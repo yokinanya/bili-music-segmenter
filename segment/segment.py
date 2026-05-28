@@ -28,7 +28,7 @@ class TimestampMismatch(Exception):
     pass
 
 # select a media to analyse
-#  any media supported by ffmpeg may be used (video, audio, urls)
+# Any local media supported by ffmpeg may be used (video or audio).
 
 
 def segment(
@@ -63,7 +63,7 @@ def segment_wrapper(
 def extract_music(
         segmentation, segment_thres=EXTRACT_SEG_THRES,
         segment_thres_final=EXTRACT_SEG_THRES_FINAL,
-        segment_connect=EXTRACT_SEG_CONNECT, start_padding=1, end_padding=4):
+        segment_connect=EXTRACT_SEG_CONNECT, start_padding=6, end_padding=10):
     r = []
     # bridges noEnergy segments that are likely fragmented
     for i in range(len(segmentation)-2, 0, -1):

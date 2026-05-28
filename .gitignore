@@ -15,3 +15,11 @@ save.yaml
 .ipynb_checkpoints/Untitled-checkpoint.ipynb
 Untitled.ipynb
 test.py
+
+.agents
+.codex
+.ruff_cache
+.vscode
+.venv
+
+output

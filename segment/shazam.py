@@ -1,11 +1,12 @@
-import os
 import glob
 import logging
+import os
 import shutil
-import regex
 import time
-import requests
 import asyncio
+
+import regex
+import requests
 from shazamio import Shazam
 
 from utils.logging import save_timestamps
@@ -20,20 +21,30 @@ async def shazam_orig(file, **kwargs):
     return shazam_title(match), match
 
 
-async def shazaming(
-    outdir, media, shazam_coverart_path='',
-    shazam_func=shazam_orig, ignore_fails=False
+async def recognize_files(
+    outdir,
+    media,
+    *,
+    recognizer_func,
+    provider_name,
+    coverart_path='',
+    coverart_func=None,
+    ignore_fails=False,
 ):
     mediab = os.path.basename(media)
     files = glob.glob(os.path.join(
         outdir, '*' + os.path.splitext(mediab)[0][1:] + '_*'
     ))
-    await asyncio.gather(*[shazam_threaded(
-        file, shazam_coverart_path=shazam_coverart_path,
-        shazam_func=shazam_func, ignore_fails=ignore_fails
+    await asyncio.gather(*[recognize_file(
+        file,
+        recognizer_func=recognizer_func,
+        provider_name=provider_name,
+        coverart_path=coverart_path,
+        coverart_func=coverart_func,
+        ignore_fails=ignore_fails,
     ) for file in files])
     save_timestamps(mediab=mediab,
-                    key='shazam', val=[
+                    key=provider_name, val=[
                         os.path.basename(x)
                         for x in glob.glob(
                             os.path.join(
@@ -42,9 +53,29 @@ async def shazaming(
                     ])
 
 
-async def shazam_threaded(
-    file, shazam_coverart_path='',
-    shazam_func=shazam_orig, ignore_fails=True
+async def shazaming(
+    outdir, media, shazam_coverart_path='',
+    shazam_func=shazam_orig, ignore_fails=False
+):
+    await recognize_files(
+        outdir,
+        media,
+        recognizer_func=shazam_func,
+        provider_name='shazam',
+        coverart_path=shazam_coverart_path,
+        coverart_func=shazam_coverart,
+        ignore_fails=ignore_fails,
+    )
+
+
+async def recognize_file(
+    file,
+    *,
+    recognizer_func,
+    provider_name,
+    coverart_path='',
+    coverart_func=None,
+    ignore_fails=True,
 ):
     results = {}
     if ' by ' in file:
@@ -52,26 +83,25 @@ async def shazam_threaded(
     filename = file[:file.rfind('.')]
     fileext = file[len(filename):]
     fn = os.path.basename(filename)
-    logging.info(['shazaming', fn])
+    logging.info([provider_name, 'recognizing', fn])
     try:
-        # match = shazam(file, stop_at_first_match = 1)[-1]
-        # results[fn] = shazam_title(match)
-        results[fn], match = await shazam_func(file)
+        results[fn], match = await recognizer_func(file)
         try:
-            logging.info([fn, 'shazam found to be', results[fn]])
+            logging.info([fn, provider_name, 'found to be', results[fn]])
         except UnicodeEncodeError:
             logging.warning(
-                [fn, 'shazam found but cant show unicode burr durr'])
+                [fn, provider_name, 'found but cant show unicode burr durr'])
         renamed_file = os.path.join(
             os.path.dirname(file),
-            #    r'D:\tmp\ytd\convert2music',
             (fn + f"_{results[fn][0].replace(':', ' ')} by {results[fn][1].replace(r'/', '')}") + fileext
         )
         shutil.move(file, renamed_file)
-        if os.path.isdir(shazam_coverart_path):
-            shazam_coverart(match, renamed_file, shazam_coverart_path)
+        if os.path.isdir(coverart_path) and coverart_func is not None:
+            coverart_func(match, renamed_file, coverart_path)
     except (IndexError, KeyError):
-        logging.error([fn, 'shazam failed'])
+        logging.error([fn, provider_name, 'failed'])
+        if not ignore_fails:
+            raise
     except Exception:
         if not ignore_fails:
             raise

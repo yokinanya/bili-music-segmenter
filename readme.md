@@ -1,146 +1,151 @@
-# 在云服务器上用 docker 部署
+# bili-music-segmenter
 
-参考配置：1 核 1GB 内存 ubuntu22 云机器
+一个只保留歌切功能的命令行工具：输入本地媒体文件，使用 `inaSpeechSegmenter` 检测音乐片段，导出 MP3，并可选用 Shazam 或外部网易云服务识别后重命名。
 
-1. 使用一键脚本安装 docker（https://docs.docker.com/engine/install/ubuntu/）
+## 功能
 
-```
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-```
+- 本地音频/视频文件切歌。
+- 导出 MP3 音频片段。
+- 可选 Shazam 或网易云识别、重命名和封面保存。
+- CPU 与 GPU Docker 镜像。
 
-2. 配置虚拟内存 swap （例：配置 5G 虚拟内存）
+## Docker
 
-```
-sudo fallocate -l 5G /swapfile
-sudo chmod 600 /swapfile
-sudo mkswap /swapfile
-sudo swapon /swapfile
-free -h
+构建 CPU 镜像：
+
+```bash
+docker build -t bili-music-segmenter .
 ```
 
-注意：您可能需要也可能不需要 sudo 来执行 docker 命令。
+构建 GPU 镜像：
 
-注意：下面的所有 docker 命令都包含用户名和组 ID。 这些映射到 1001:1001，因为它们是 Oracle 服务器的默认值。 如果您找不到此信息，只需删除它们并在 root 下运行 docker 容器即可。
-
-注意：对于 Windows 服务器，运行 `${pwd}` 而不是 `"$(pwd)"`
-
-3. git clone repo
-
-```
-git clone -b inaseg-cloud https://github.com/lovegaoshi/ipynb.git
-cd ipynb
+```bash
+docker build -f Dockerfile-gpu -t bili-music-segmenter:gpu .
 ```
 
-3a. 安装 docker 镜像
+切本地文件：
 
-```
-sudo docker build -t ipynb-inaseg .
-```
-
-OR:
-
-3b. 拉一个预制的 docker 镜像
-
-https://hub.docker.com/repository/docker/gaoshi/ipynb-inaseg/tags?page=1&ordering=last_updated
-
-```
-sudo docker pull gaoshi/ipynb-inaseg:nightly
-sudo docker tag gaoshi/ipynb-inaseg:nightly ipynb-inaseg
+```bash
+docker run --rm -v "$(pwd)":/inaseg bili-music-segmenter \
+  python /inaseg/inaseg.py \
+  --media /inaseg/input.mp4 \
+  --outdir /inaseg/output
 ```
 
-4. 用 biliup-rs 登录 b 站账号
+GPU 运行时需要宿主机已安装 NVIDIA Container Toolkit：
 
-```
-sudo docker run -v "$(pwd)":/inaseg -u 1001:1001 -it --rm ipynb-inaseg
-biliup login
-```
-
-```
-nano configs/biliWrapper.json
+```bash
+docker run --rm --gpus all -v "$(pwd)":/inaseg bili-music-segmenter:gpu \
+  python /inaseg/inaseg.py \
+  --media /inaseg/input.mp4 \
+  --outdir /inaseg/output
 ```
 
-```
-nano configs/biliWatcher.yaml
-```
+## 本地运行
 
-5.配置
+系统需要先安装 `ffmpeg`、`ffprobe`。启用网易云识别时还需要 `node`。
 
-configs/biliWrapper.json：填 b 站投稿的相关信息。格式为：
-
-```
-"VUP名": [
-        "VUP直播间（转载地址）",
-        "视频简介",
-        [
-            "视频标签"
-        ]
-    ],
+```bash
+uv sync
+uv run inaseg.py --media input.mp4 --outdir output
 ```
 
-configs/biliWatcher.yaml：填监控的相关信息。格式为：
+## Shazam 识别
 
-```
-- extractor: biliseries
-  filter: karaoke
-  last_url: true
-  url: b站录播合集url
-```
+加上 `--shazam` 后，会对导出的片段调用真实 Shazam 识别，并按识别结果重命名：
 
-6. 使用
-
-切 MP3，适用于自留，做https://steria.vplayer.tk/ 无需登录 b 站账号。
-
-`sudo docker run -v "$(pwd)":/inaseg -u 1001:1001 ipynb-inaseg python /inaseg/inaseg.py --shazam --shazam_multithread=2 --cleanup --outdir=/inaseg --aria=8 --media={回放网址，或本地录播文件地址}`
-
-上传 b 站
-
-`sudo docker run -v "$(pwd)":/inaseg -u 1001:1001 --rm ipynb-inaseg python /inaseg/biliupWrapper.py --media https://www.bilibili.com/video/BV19W4y157Vj/ `
-
-监控 b 站录播合集
-
-`sudo docker compose up -d`
-~sudo docker run -v "$(pwd)":/inaseg -u 1001:1001 --rm ipynb-inaseg python /inaseg/watcher.py --watch_interval=12800~
-
-# WINDOWS
-
-windows 下也推荐用 docker：https://github.com/lovegaoshi/ipynb/issues/9
-
-# 附加功能
-
-问：更好的系统？ 更多内存？
-
-将 `inaseg.py` 中的 batch_size: `segment_wrapper(media: str, batch_size: int = 32` 从 `32` 更改为较大的值，如 `128` 或 `512`；较大的批次可能会带来 100% 的性能提升。
-
-将媒体滑动窗口大小：“inaseg.py”中的“SEGMENT_THRES = 600”更改为较大的值； 这是在几秒内要处理的最大媒体块。 更大的块将节省磁盘读取。
-
-问：有 CUDA 吗？
-
-改为拉取此图像：
-
-```
-sudo docker pull gaoshi/ipynb-inaseg:nightly-gpu
-sudo docker tag gaoshi/ipynb-inaseg:nightly-gpu ipynb-inaseg
+```bash
+python inaseg.py --media input.mp4 --outdir output --shazam
 ```
 
-运行 docker 时，添加 `--gpus all`。
+保存封面：
 
-要检查 GPU 是否已启用，请运行：
-
-```
-sudo docker run -v "$(pwd)":/inaseg -it --rm ipynb-inaseg
-python3
-import tensorflow as tf
-print(tf.config.list_physical_devices('GPU'))
+```bash
+python inaseg.py --media input.mp4 --outdir output --shazam --shazam_coverart output/covers
 ```
 
-请注意，计算机的 CUDA 版本可能需要大于 docker 中的 CUDA 版本 (11.3?)。
+## 网易云识别
 
-问：速度测试
+网易云 `/audio/match` 需要 `audioFP` 音频指纹，不直接接收本地音频文件。本工具会先用 `ffmpeg` 从片段中抽取 3 秒 8kHz PCM，再通过 `vendor/ncm-afp` 生成 `audioFP`，最后把 `duration` 和 `audioFP` 作为 query 参数直接请求 NeteaseCloudMusicApi 路由。
 
-inaseg 获取 1 小时的媒体文件：
-Oracle E2.micro(1C2T): ~1hr
+`--netease_endpoint` 填标准 NeteaseCloudMusicApi 的 `/audio/match` 地址即可。接口不强制登录；如你的部署需要登录态，可以用 `--netease_cookie` 透传 cookie。
 
-AMD Ryzen 3700X(8C16T): ~2min?
+本地启动 NeteaseCloudMusicApi：
 
-NVIDIA 1070, 2070S: < 20s
+```bash
+npx NeteaseCloudMusicApi@latest
+```
+
+默认服务地址为 `http://127.0.0.1:3000`，对应识别接口 `http://127.0.0.1:3000/audio/match`。
+
+NeteaseCloudMusicApi 自带 demo 的逻辑是：在当前播放位置点击 Clip 后录 3 秒，生成 `audioFP`，再 `POST /audio/match?duration=3&audioFP=...`。本工具默认 `--netease_offsets 6,12,20,30`，跳过切片开头的完整优先缓冲后尝试多个 3 秒窗口；全部无匹配时会抛出每个窗口的 `noMatchReason`。
+
+```bash
+python inaseg.py \
+  --media input.mp4 \
+  --outdir output \
+  --netease \
+  --netease_endpoint http://127.0.0.1:3000/audio/match
+```
+
+## 识别回退
+
+启用 `--recognizer_fallback` 后，主识别平台失败会显式记录 warning，然后调用另一个平台。
+
+Shazam 优先，失败后回退到网易云：
+
+```bash
+python inaseg.py \
+  --media input.mp4 \
+  --outdir output \
+  --shazam \
+  --recognizer_fallback \
+  --netease_endpoint http://127.0.0.1:3000/audio/match
+```
+
+网易云优先，失败后回退到 Shazam：
+
+```bash
+python inaseg.py \
+  --media input.mp4 \
+  --outdir output \
+  --netease \
+  --recognizer_fallback \
+  --netease_endpoint http://127.0.0.1:3000/audio/match
+```
+
+## 参数
+
+默认配置偏向“完整优先”，会在检测出的音乐段前后保留缓冲，减少歌曲首尾被截断。
+
+- `--media`：本地媒体路径，必填。
+- `--outdir`：导出目录，默认使用系统临时目录。
+- `--shazam`：导出后调用 Shazam 识别。
+- `--shazam_coverart`：保存 Shazam 封面的目录。
+- `--netease`：导出后调用外部网易云识别服务。
+- `--netease_endpoint`：NeteaseCloudMusicApi `/audio/match` 地址，启用 `--netease` 时必填。
+- `--netease_coverart`：保存网易云封面的目录。
+- `--netease_cookie`：传给 NeteaseCloudMusicApi 的网易云 cookie。
+- `--netease_timeout`：网易云识别服务请求超时，单位秒。
+- `--netease_offsets`：生成网易云 `audioFP` 前尝试跳过的秒数列表，默认 `6,12,20,30`。
+- `--netease_rejects`：丢弃指定网易云识别结果，格式为 `歌名|艺人`，多项用逗号分隔，默认丢弃 `劫|黄霄雲`。
+- `--recognizer_fallback`：主识别失败时回退到另一个识别平台。
+- `--soundonly`：导出音频 MP3 片段，默认开启。
+- `--keep_video`：保留视频/音频片段，不转换为 MP3。
+- `--seg_connect`：相邻音乐段合并阈值，单位秒。
+- `--cleanup`：完成后删除原始下载文件。
+- `--max_segment_length`：长媒体分块处理阈值，单位秒。
+
+## 输出
+
+导出的文件位于 `--outdir`，命名格式为：
+
+```text
+原文件名_序号.mp3
+```
+
+启用识别后，识别成功的文件会被重命名为：
+
+```text
+原文件名_序号_歌曲名 by 艺人.mp3
+```
