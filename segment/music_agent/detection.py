@@ -6,13 +6,17 @@ import logging
 import math
 import tempfile
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any
 
+from segment.music_agent.boundary_review import GROUPING_PROMPT, BoundaryOptions, review_boundaries
 from segment.music_agent.media import extract_wav, make_windows, media_duration
-from segment.music_agent.models import audio_model_call, call_with_oss
+from segment.music_agent.models import audio_model_call, call_with_storage
 from segment.music_agent.prompts import BOUNDARY_PROMPT, SCAN_PROMPT
+from segment.music_agent.storage import AudioStorage
 
 LOGGER = logging.getLogger(__name__)
 VALID_CLASSES = {"host_singing", "background_music_chat", "mixed_singing_and_chat", "uncertain"}
@@ -98,99 +102,102 @@ def merge_candidates(candidates: list[Candidate], max_gap: float) -> list[Candid
     ]
 
 
+@dataclass(frozen=True)
+class ScanContext:
+    media: Path
+    client: Any
+    storage: AudioStorage
+    prefix: str
+    model: str
+    run_id: str
+
+
 def scan_candidates(
     media: Path,
     client: Any,
-    bucket: Any,
+    storage: AudioStorage,
     *,
     chunk_seconds: int,
     chunk_context: int,
-    oss_prefix: str,
+    s3_prefix: str,
     model: str,
+    scan_concurrency: int = 3,
 ) -> tuple[list[Candidate], list[dict[str, Any]]]:
-    duration = media_duration(media)
-    windows = make_windows(duration, chunk_seconds, chunk_context)
-    candidates = []
-    metadata = []
-    run_id = uuid.uuid4().hex
-    for chunk_index, (core_start, core_end, audio_start, audio_end) in enumerate(windows, 1):
-        with tempfile.TemporaryDirectory(prefix="music-scan-") as directory:
-            wav = Path(directory) / "chunk.wav"
-            extract_wav(media, audio_start, audio_end, wav)
-            key = f"{oss_prefix}/{run_id}/scan-{chunk_index:04d}.wav"
-            try:
-                bucket.put_object_from_file(key, str(wav))
-                audio_url = bucket.sign_url("GET", key, 3600, slash_safe=True)
-                prompt = (
-                    f"{SCAN_PROMPT}\n核心范围是输入音频 {core_start - audio_start:.2f}-"
-                    f"{core_end - audio_start:.2f} 秒；只记录起点在核心范围的音乐候选。"
-                )
-                response = audio_model_call(client, model, prompt, audio_url)
-                found = parse_candidates(response["data"], audio_start)
-                current = [item for item in found if core_start <= item.start < core_end]
-                candidates.extend(current)
-                metadata.append(
-                    {
-                        "chunk": chunk_index,
-                        "core_start": core_start,
-                        "core_end": core_end,
-                        "candidate_count": len(current),
-                        "usage": response["usage"],
-                    }
-                )
-                LOGGER.info("Scanned chunk %d/%d", chunk_index, len(windows))
-            finally:
-                bucket.delete_object(key)
+    if scan_concurrency <= 0:
+        raise ValueError("扫描并发数必须为正整数")
+    windows = make_windows(media_duration(media), chunk_seconds, chunk_context)
+    context = ScanContext(media, client, storage, s3_prefix, model, uuid.uuid4().hex)
+    worker = partial(_scan_window, context)
+    with ThreadPoolExecutor(max_workers=scan_concurrency) as executor:
+        results = list(executor.map(worker, enumerate(windows, 1)))
+    candidates = [candidate for current, _ in results for candidate in current]
+    metadata = [record for _, record in results]
     return merge_candidates(candidates, max_gap=0), metadata
+
+
+def _scan_window(context: ScanContext, item: tuple) -> tuple[list[Candidate], dict]:
+    chunk_index, (core_start, core_end, audio_start, audio_end) = item
+    with tempfile.TemporaryDirectory(prefix="music-scan-") as directory:
+        wav = Path(directory) / "chunk.wav"
+        extract_wav(context.media, audio_start, audio_end, wav)
+        key = "/".join(filter(None, (context.prefix, context.run_id, f"scan-{chunk_index:04d}.wav")))
+        context.storage.upload(key, wav)
+        try:
+            audio_url = context.storage.signed_url(key)
+            prompt = (
+                f"{SCAN_PROMPT}\n核心范围是输入音频 {core_start - audio_start:.2f}-"
+                f"{core_end - audio_start:.2f} 秒；只记录起点在核心范围的音乐候选。"
+            )
+            response = audio_model_call(context.client, context.model, prompt, audio_url)
+            found = parse_candidates(response["data"], audio_start)
+            current = [candidate for candidate in found if core_start <= candidate.start < core_end]
+            record = {
+                "chunk": chunk_index,
+                "core_start": core_start,
+                "core_end": core_end,
+                "candidate_count": len(current),
+                "usage": response["usage"],
+            }
+            LOGGER.info("Scanned chunk %d", chunk_index)
+            return current, record
+        finally:
+            context.storage.delete(key)
 
 
 def refine_candidate(
     media: Path,
     candidate: Candidate,
     client: Any,
-    bucket: Any,
+    storage: AudioStorage,
     *,
     context_seconds: float,
-    oss_prefix: str,
+    s3_prefix: str,
     model: str,
     minimum_confidence: float,
+    review_instruction: str = "",
 ) -> tuple[list[tuple[float, float]], dict[str, Any]]:
     duration = media_duration(media)
-    audio_start = max(0.0, candidate.start - context_seconds)
-    audio_end = min(duration, candidate.end + context_seconds)
-    prompt = (
-        f"{BOUNDARY_PROMPT}\n目标候选范围是输入音频 "
-        f"{candidate.start - audio_start:.2f}-{candidate.end - audio_start:.2f} 秒。"
-    )
-    response = call_with_oss(
-        media,
-        audio_start,
-        audio_end,
-        client,
-        bucket,
-        model=model,
-        prompt=prompt,
-        oss_prefix=oss_prefix,
-    )
-    data = response["data"]
-    confidence = float(data.get("confidence", 0))
-    if not math.isfinite(confidence) or not 0 <= confidence <= 1:
-        raise ValueError("模型返回了无效置信度")
-    if data.get("host_singing_present") is not True or confidence < minimum_confidence:
-        return [], {"data": data, "usage": response["usage"]}
-    intervals = []
-    for item in data.get("intervals", []):
-        local_start, local_end = float(item["start_seconds"]), float(item["end_seconds"])
-        if (
-            not all(math.isfinite(x) for x in (local_start, local_end))
-            or not 0 <= local_start < local_end <= audio_end - audio_start
-        ):
-            raise ValueError("模型演唱边界超出输入音频或时间无效")
-        start = audio_start + local_start
-        end = audio_start + local_end
-        if end > start:
-            intervals.append((start, end))
-    return intervals, {"data": data, "usage": response["usage"]}
+    options = BoundaryOptions(candidate.start, candidate.end, duration, context_seconds, minimum_confidence)
+
+    def request(audio_start: float, audio_end: float) -> dict:
+        prompt = (
+            f"{BOUNDARY_PROMPT}{GROUPING_PROMPT}\n目标候选范围是输入音频 "
+            f"{candidate.start - audio_start:.2f}-{candidate.end - audio_start:.2f} 秒。"
+        )
+        if review_instruction:
+            prompt += f"\n待核实疑点（仅为线索）：{review_instruction}"
+        return call_with_storage(
+            media,
+            audio_start,
+            audio_end,
+            client,
+            storage,
+            model=model,
+            prompt=prompt,
+            s3_prefix=s3_prefix,
+        )
+
+    return review_boundaries(options, request)
 
 
 def merge_intervals(intervals: list[tuple[float, float]], max_gap: float) -> list[tuple[float, float]]:

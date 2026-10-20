@@ -6,6 +6,11 @@ services:
         DEPENDENCY_GROUP: api
     env_file:
       - .env
+    environment:
+      MUSIC_AGENT_NETEASE_ENDPOINT: http://netease:3000/audio/match
+      WEBUI_OUTPUT_DIR: /output
+    ports:
+      - "127.0.0.1:7860:7860"
     volumes:
       - ./input:/input:ro
       - ./output:/output
@@ -19,13 +24,9 @@ services:
       - --group
       - api
       - -m
-      - segment.music_agent.cli
-      - --media
-      - /input/input.mp4
-      - --outdir
-      - /output
-      - --netease-endpoint
-      - http://netease:3000/audio/match
+      - segment.webui
+      - --host
+      - 0.0.0.0
 
   netease:
     image: node:24-alpine

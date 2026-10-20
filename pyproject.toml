@@ -23,7 +23,7 @@ api = [
     { include-group = "recognizers" },
     "openai>=1.68",
     "opencc-python-reimplemented>=0.1.7",
-    "oss2>=2.19",
+    "boto3>=1.35",
     "python-dotenv>=1.0",
 ]
 gpu = [

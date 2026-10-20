@@ -3,7 +3,6 @@ import glob
 import logging
 import os
 import shutil
-import time
 
 import regex
 import requests
@@ -15,6 +14,8 @@ myshazam = Shazam()
 
 async def shazam_orig(file, **kwargs):
     match = await shazam(file)
+    if match is None:
+        return None
     return shazam_title(match), match
 
 
@@ -105,8 +106,21 @@ async def recognize_file(
 async def shazam(mp3):
     async with semaphore:
         match = await myshazam.recognize(mp3)
-        time.sleep(3)
-        return match["track"]
+        await asyncio.sleep(3)
+        return parse_shazam_response(match)
+
+
+def parse_shazam_response(response):
+    if not isinstance(response, dict):
+        raise ValueError("Shazam 响应必须是对象")
+    if "track" in response:
+        track = response["track"]
+        if not isinstance(track, dict) or not all(isinstance(track.get(key), str) for key in ("title", "subtitle")):
+            raise ValueError("Shazam track 缺少有效歌名或歌手")
+        return track
+    if response.get("matches") == []:
+        return None
+    raise ValueError(f"Shazam 响应缺少 track，字段：{sorted(response)}")
 
 
 def legalize_filename(fn):

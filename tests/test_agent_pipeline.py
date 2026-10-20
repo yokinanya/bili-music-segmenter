@@ -34,12 +34,13 @@ def test_boundaries_can_extend_into_context_but_not_outside_audio(monkeypatch):
     monkeypatch.setattr(detection, "media_duration", lambda _: 300)
     monkeypatch.setattr(
         detection,
-        "call_with_oss",
+        "call_with_storage",
         lambda *args, **kwargs: {
             "data": {
                 "host_singing_present": True,
                 "confidence": 0.9,
-                "intervals": [{"start_seconds": 10, "end_seconds": 90}],
+                "intervals": [{"start_seconds": 10, "end_seconds": 85}],
+                "song_groups": [[0]],
             },
             "usage": None,
         },
@@ -51,18 +52,18 @@ def test_boundaries_can_extend_into_context_but_not_outside_audio(monkeypatch):
         None,
         None,
         context_seconds=20,
-        oss_prefix="test",
+        s3_prefix="test",
         model="qwen3.8-omni-flash",
         minimum_confidence=0.85,
     )
-    assert intervals == [(90, 170)]
+    assert intervals == [(90, 165)]
 
 
 def test_background_skip_and_successful_export_pipeline(tmp_path, monkeypatch):
-    config = ApiConfig("test", "https://example.com/v1", "id", "secret", "endpoint", "bucket", "test")
+    config = ApiConfig("test", "https://example.com/v1", "id", "secret", "endpoint", "bucket", "test", "us-east-1")
     monkeypatch.setattr(agent, "load_config", lambda: config)
-    monkeypatch.setattr("oss2.Bucket", lambda *args: None)
-    monkeypatch.setattr("oss2.Auth", lambda *args: None)
+    monkeypatch.setattr(agent, "text_model_call", lambda *a: {"data": {"summary": "ok", "rechecks": []}, "usage": None})
+    monkeypatch.setattr(agent, "create_storage", lambda _: None)
     monkeypatch.setattr("openai.OpenAI", lambda **kwargs: None)
     monkeypatch.setattr(agent, "media_duration", lambda _: 300)
     candidates = [
@@ -93,10 +94,10 @@ def test_background_skip_and_successful_export_pipeline(tmp_path, monkeypatch):
 
 
 def test_zero_candidates_still_produces_manifest(tmp_path, monkeypatch):
-    config = ApiConfig("test", "https://example.com/v1", "id", "secret", "endpoint", "bucket", "test")
+    config = ApiConfig("test", "https://example.com/v1", "id", "secret", "endpoint", "bucket", "test", "us-east-1")
     monkeypatch.setattr(agent, "load_config", lambda: config)
-    monkeypatch.setattr("oss2.Bucket", lambda *args: None)
-    monkeypatch.setattr("oss2.Auth", lambda *args: None)
+    monkeypatch.setattr(agent, "text_model_call", lambda *a: {"data": {"summary": "ok", "rechecks": []}, "usage": None})
+    monkeypatch.setattr(agent, "create_storage", lambda _: None)
     monkeypatch.setattr("openai.OpenAI", lambda **kwargs: None)
     monkeypatch.setattr(agent, "media_duration", lambda _: 300)
     monkeypatch.setattr(agent, "scan_candidates", lambda *args, **kwargs: ([], []))

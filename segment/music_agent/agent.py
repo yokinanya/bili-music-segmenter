@@ -10,17 +10,19 @@ from pathlib import Path
 from typing import Any
 
 from segment.music_agent.config import load_config
-from segment.music_agent.detection import merge_intervals, refine_candidate, scan_candidates
+from segment.music_agent.detection import refine_candidate, scan_candidates
 from segment.music_agent.export import export_video, make_clip_path
+from segment.music_agent.final_review import ReviewContext, audit_results
 from segment.music_agent.manifest import write_manifest
 from segment.music_agent.media import extract_wav, media_duration
-from segment.music_agent.models import text_model_call
+from segment.music_agent.models import call_with_storage, text_model_call
 from segment.music_agent.prompts import TITLE_PROMPT
 from segment.music_agent.recognition import (
     deterministic_title_choice,
     recognize_audio,
-    resolve_title_with_model,
 )
+from segment.music_agent.storage import create_storage
+from segment.music_agent.title_resolution import TitleContext, needs_audio_title, resolve_audio_title
 
 LOGGER = logging.getLogger(__name__)
 OMNI_MODEL = "qwen3.8-omni-flash"
@@ -37,6 +39,7 @@ async def run_agent(
     output_dir: Path,
     *,
     chunk_seconds: int = 600,
+    scan_concurrency: int = 3,
     chunk_context_seconds: int = 30,
     boundary_context_seconds: int = 20,
     minimum_candidate_seconds: float = 30,
@@ -45,6 +48,7 @@ async def run_agent(
     merge_gap_seconds: float = 10,
     use_title_model: bool = True,
     title_model: str = TITLE_MODEL,
+    summary_model: str = TITLE_MODEL,
     use_shazam: bool = True,
     use_netease: bool = True,
     netease_endpoint: str = "http://127.0.0.1:3000/audio/match",
@@ -52,7 +56,6 @@ async def run_agent(
     recognizer_timeout: int = 60,
     manifest_path: Path | None = None,
 ) -> Path:
-    import oss2
     from openai import OpenAI
 
     config = load_config()
@@ -67,22 +70,21 @@ async def run_agent(
         raise ValueError("最短时长必须为正，合并间隔不能为负")
     if recognizer_timeout <= 0:
         raise ValueError("识曲超时必须为正")
+    if scan_concurrency <= 0:
+        raise ValueError("扫描并发数必须为正整数")
     output_dir.mkdir(parents=True, exist_ok=True)
-    oss_prefix = config.oss_prefix
-    bucket = oss2.Bucket(
-        oss2.Auth(config.oss_access_key, config.oss_access_secret),
-        config.oss_endpoint,
-        config.oss_bucket,
-    )
+    s3_prefix = config.s3_prefix
+    storage = create_storage(config)
     client = OpenAI(api_key=config.api_key, base_url=config.base_url, timeout=900, max_retries=1)
     duration = media_duration(media)
     candidates, chunks = scan_candidates(
         media,
         client,
-        bucket,
+        storage,
         chunk_seconds=chunk_seconds,
+        scan_concurrency=scan_concurrency,
         chunk_context=chunk_context_seconds,
-        oss_prefix=oss_prefix,
+        s3_prefix=s3_prefix,
         model=OMNI_MODEL,
     )
     candidates = [candidate for candidate in candidates if candidate.end - candidate.start >= minimum_candidate_seconds]
@@ -102,6 +104,7 @@ async def run_agent(
     model_config = {
         "audio_scan_and_boundary": OMNI_MODEL,
         "title_resolution": title_model if use_title_model else None,
+        "final_summary": summary_model,
     }
 
     def persist() -> None:
@@ -139,13 +142,12 @@ async def run_agent(
             media,
             candidate,
             client,
-            bucket,
+            storage,
             context_seconds=boundary_context_seconds,
-            oss_prefix=oss_prefix,
+            s3_prefix=s3_prefix,
             model=OMNI_MODEL,
             minimum_confidence=minimum_confidence,
         )
-        intervals = merge_intervals(intervals, merge_gap_seconds)
         record["boundary_review"] = boundary
         record["singing_intervals"] = []
         record["decision"] = "no_confident_singing"
@@ -192,40 +194,108 @@ async def run_agent(
             title, artist, resolution = deterministic_title_choice(recognition)
             title_review = None
             if resolution == "conflict" and use_title_model:
-                recognition["title_hint"] = candidate.title_hint
-                title_review = _review_title(recognition, client, model=title_model)
-                title, artist, resolution = resolve_title_with_model(recognition, title_review["data"])
+                recognition["text_title_review"] = _review_title(recognition, client, model=title_model)
+            if needs_audio_title(recognition, resolution):
+                verified = resolve_audio_title(
+                    {"start_seconds": start, "end_seconds": end},
+                    recognition,
+                    TitleContext(media, client, storage, OMNI_MODEL, s3_prefix, call_with_storage),
+                )
+                title, artist, resolution = verified["title"], verified["artist"], verified["status"]
+                title_review = verified["audio_review"]
             if not title:
                 title = ""
                 artist = ""
             else:
                 artist = artist or ""
-            destination = make_clip_path(output_dir, media.stem, candidate.index, start, end, title, artist)
-            export_video(media, start, end, destination)
             interval_record = {
                 "start_seconds": start,
                 "end_seconds": end,
                 "duration_seconds": round(end - start, 3),
                 "recognition": recognition,
                 "title_resolution": {"status": resolution, "qwen": title_review},
-                "file": str(destination),
+                "title": title,
+                "artist": artist,
             }
             record["singing_intervals"].append(interval_record)
-            exported_intervals.append(interval_record)
-            record["decision"] = "exported"
+            record["decision"] = "prepared"
         candidate_records.append(record)
         persist()
         LOGGER.info("Processed candidate %02d: %s", candidate.index, record["decision"])
 
-    write_manifest(
-        manifest_path,
+    review_context = ReviewContext(
         media=media,
-        duration=duration,
-        models=model_config,
-        policy=run_policy,
-        chunks=chunks,
-        candidate_count=len(candidates),
-        candidates=candidate_records,
-        exported_count=len(exported_intervals),
+        client=client,
+        storage=storage,
+        model=summary_model,
+        audio_model=OMNI_MODEL,
+        prefix=s3_prefix,
+        context_seconds=boundary_context_seconds,
+        minimum_confidence=minimum_confidence,
+        merge_gap=merge_gap_seconds,
+        minimum_seconds=minimum_singing_seconds,
     )
+    candidate_records = audit_results(
+        candidate_records, review_context, text_call=text_model_call, refine=refine_candidate
+    )
+    persist()
+    for record in candidate_records:
+        for interval in record.get("singing_intervals", []):
+            if "recognition" not in interval:
+                interval.update(
+                    await _recognize_reviewed_interval(
+                        media,
+                        interval,
+                        audio_title_context=TitleContext(
+                            media, client, storage, OMNI_MODEL, s3_prefix, call_with_storage
+                        ),
+                        recognition_options={
+                            "netease_endpoint": netease_endpoint,
+                            "netease_cookie": netease_cookie,
+                            "timeout": recognizer_timeout,
+                            "use_shazam": use_shazam,
+                            "use_netease": use_netease,
+                        },
+                    )
+                )
+            destination = make_clip_path(
+                output_dir,
+                media.stem,
+                record["index"],
+                interval["start_seconds"],
+                interval["end_seconds"],
+                interval["title"],
+                interval["artist"],
+            )
+            export_video(media, interval["start_seconds"], interval["end_seconds"], destination)
+            interval["file"] = str(destination)
+            exported_intervals.append(interval)
+            record["decision"] = "exported"
+            persist()
+    persist()
     return manifest_path
+
+
+async def _recognize_reviewed_interval(
+    media: Path,
+    interval: dict,
+    *,
+    recognition_options: dict,
+    audio_title_context: TitleContext,
+) -> dict:
+    with tempfile.TemporaryDirectory(prefix="music-final-recognition-") as directory:
+        wav = Path(directory) / "reference.wav"
+        extract_wav(media, interval["start_seconds"], interval["end_seconds"], wav)
+        recognition = await recognize_audio(wav, **recognition_options)
+    title, artist, status = deterministic_title_choice(recognition)
+    review = None
+    if needs_audio_title(recognition, status):
+        verified = resolve_audio_title(interval, recognition, audio_title_context)
+        title, artist, status = verified["title"], verified["artist"], verified["status"]
+        review = verified["audio_review"]
+    return {
+        "recognition": recognition,
+        "title": title,
+        "artist": artist,
+        "title_resolution": {"status": status, "qwen": review},
+    }

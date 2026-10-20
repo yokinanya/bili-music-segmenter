@@ -85,9 +85,10 @@ def netease_coverart(match, fn, outdir):
 
 
 def generate_audio_fp(file, offset):
-    with tempfile.NamedTemporaryFile(suffix=".f32le") as pcm_file:
-        _extract_pcm(file, pcm_file.name, offset)
-        return _run_afp_generator(pcm_file.name)
+    with tempfile.TemporaryDirectory(prefix="netease-afp-") as directory:
+        pcm_path = os.path.join(directory, "audio.f32le")
+        _extract_pcm(file, pcm_path, offset)
+        return _run_afp_generator(pcm_path)
 
 
 def parse_offsets(value):
