@@ -1,11 +1,11 @@
-import re
 import logging
+import re
 from datetime import timedelta
 
 
 def mus1ca_timestamp(description, delimited=" /"):
     timestamps = []
-    for i in open(description, "r", encoding="UTF-8"):
+    for i in open(description, encoding="UTF-8"):
         if len(re.findall(r"\d+:\d+", i)) == 0:
             continue
         i = (

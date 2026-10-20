@@ -1,9 +1,10 @@
-FROM tensorflow/tensorflow:2.18.0
-RUN apt-get update && apt-get -y install ffmpeg wget git nodejs
+FROM python:3.12-slim
+COPY --from=ghcr.io/astral-sh/uv:0.9.26 /uv /usr/local/bin/uv
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg git nodejs \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /inaseg
-COPY ./requirements.txt /inaseg/requirements.txt
-RUN pip3 install -r /inaseg/requirements.txt
-RUN wget https://getsamplefiles.com/download/mp3/sample-1.mp3 -P /home
-COPY . /inaseg
-# Testing
-RUN python3 /inaseg/inaseg.py --media /home/sample-1.mp3
+COPY pyproject.toml uv.lock ./
+ARG DEPENDENCY_GROUP=local
+RUN uv sync --frozen --group ${DEPENDENCY_GROUP}
+ENV PATH="/inaseg/.venv/bin:$PATH"
+COPY . .

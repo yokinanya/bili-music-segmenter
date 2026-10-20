@@ -1,25 +1,30 @@
+# Python and tools
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+*.egg-info/
 
-__pycache__
-*.pyc
-
+# Local settings and secrets
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/
+.agents/
+.codex/
 cookies.json
-
-inaupload
-!inaupload/inaupload.md
-
-*.sqlite
-*.log
 ytdlp_cookies.txt
+
+# Generated output and runtime state
+/input/
+/output/
+*.log
+*.sqlite
+*.sqlite3
 save.yaml
-*.old
-.ipynb_checkpoints/Untitled-checkpoint.ipynb
-Untitled.ipynb
-test.py
-
-.agents
-.codex
-.ruff_cache
-.vscode
-.venv
-
-output
+.ipynb_checkpoints/

@@ -1,9 +1,0 @@
-git+https://github.com/lovegaoshi/inaSpeechSegmenter.git
-numpy==1.26.3
-pandas
-pyyaml>=6.0.3
-regex>=2026.5.9
-requests>=2.34.2
-scikit-image
-shazamio<0.8
-tensorflow>=2.18,<2.19

@@ -1,6 +1,10 @@
-FROM tensorflow/tensorflow:2.18.0-gpu
-RUN apt-get update && apt-get -y install ffmpeg wget git nodejs
+FROM python:3.12-slim
+COPY --from=ghcr.io/astral-sh/uv:0.9.26 /uv /usr/local/bin/uv
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg git nodejs \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /inaseg
-COPY ./requirements.txt /inaseg/requirements.txt
-RUN pip3 install -r /inaseg/requirements.txt
-COPY . /inaseg
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --group local
+ENV PATH="/inaseg/.venv/bin:$PATH"
+COPY . .
+RUN uv sync --frozen --group local --group gpu

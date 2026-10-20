@@ -1,0 +1,23 @@
+name: checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.26"
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: uv sync --frozen --group api --group dev
+      - run: uv run --frozen --group api --group dev ruff check .
+      - run: uv run --frozen --group api --group dev ruff format --check .
+      - run: uv run --frozen --group api --group dev -m pytest

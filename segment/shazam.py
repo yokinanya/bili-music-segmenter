@@ -1,16 +1,13 @@
+import asyncio
 import glob
 import logging
 import os
 import shutil
 import time
-import asyncio
 
 import regex
 import requests
 from shazamio import Shazam
-
-from utils.logging import save_timestamps
-
 
 semaphore = asyncio.Semaphore(3)
 myshazam = Shazam()
@@ -32,9 +29,7 @@ async def recognize_files(
     ignore_fails=False,
 ):
     mediab = os.path.basename(media)
-    files = glob.glob(
-        os.path.join(outdir, "*" + os.path.splitext(mediab)[0][1:] + "_*")
-    )
+    files = glob.glob(os.path.join(outdir, "*" + os.path.splitext(mediab)[0][1:] + "_*"))
     await asyncio.gather(
         *[
             recognize_file(
@@ -48,21 +43,16 @@ async def recognize_files(
             for file in files
         ]
     )
+    from utils.logging import save_timestamps
+
     save_timestamps(
         mediab=mediab,
         key=provider_name,
-        val=[
-            os.path.basename(x)
-            for x in glob.glob(
-                os.path.join(outdir, f"*{mediab[1 : mediab.rfind('.')]}*")
-            )
-        ],
+        val=[os.path.basename(x) for x in glob.glob(os.path.join(outdir, f"*{mediab[1 : mediab.rfind('.')]}*"))],
     )
 
 
-async def shazaming(
-    outdir, media, shazam_coverart_path="", shazam_func=shazam_orig, ignore_fails=False
-):
+async def shazaming(outdir, media, shazam_coverart_path="", shazam_func=shazam_orig, ignore_fails=False):
     await recognize_files(
         outdir,
         media,
@@ -95,16 +85,10 @@ async def recognize_file(
         try:
             logging.info([fn, provider_name, "found to be", results[fn]])
         except UnicodeEncodeError:
-            logging.warning(
-                [fn, provider_name, "found but cant show unicode burr durr"]
-            )
+            logging.warning([fn, provider_name, "found but cant show unicode burr durr"])
         renamed_file = os.path.join(
             os.path.dirname(file),
-            (
-                fn
-                + f"_{results[fn][0].replace(':', ' ')} by {results[fn][1].replace(r'/', '')}"
-            )
-            + fileext,
+            (fn + f"_{results[fn][0].replace(':', ' ')} by {results[fn][1].replace(r'/', '')}") + fileext,
         )
         shutil.move(file, renamed_file)
         if os.path.isdir(coverart_path) and coverart_func is not None:
@@ -146,9 +130,7 @@ def legalize_filename(fn):
 def shazam_title(match):
     title = legalize_filename(match["title"])
     if "in the style of" in title.lower():
-        artist = title[
-            title.lower().index("in the style of ") + len("in the style of ") :
-        ]
+        artist = title[title.lower().index("in the style of ") + len("in the style of ") :]
         artist = artist[: artist.index(")")]
     else:
         artist = legalize_filename(match["subtitle"])
@@ -164,9 +146,7 @@ def shazam_coverart(match, fn, outdir):
         albumart = match["images"]["coverarthq"]
         req = requests.get(albumart)
         with open(
-            os.path.join(
-                outdir, os.path.basename(fn) + albumart[albumart.rfind(".") :]
-            ),
+            os.path.join(outdir, os.path.basename(fn) + albumart[albumart.rfind(".") :]),
             "wb",
         ) as f:
             f.write(req.content)

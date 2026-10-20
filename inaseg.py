@@ -4,6 +4,7 @@ import logging
 import os
 import tempfile
 
+from segment.netease import netease_coverart, netease_orig, neteasing
 from segment.segment import (
     SEGMENT_THRES,
     TimestampMismatch,
@@ -11,14 +12,12 @@ from segment.segment import (
     extract_music,
     segment_wrapper,
 )
-from segment.netease import netease_coverart, netease_orig, neteasing
 from segment.shazam import (
     recognize_files,
     shazam_coverart,
     shazam_orig,
     shazaming,
 )
-
 
 if __name__ == "__main__":
     import argparse
@@ -37,9 +36,7 @@ if __name__ == "__main__":
         default=False,
         help="shazam the extracted files",
     )
-    parser.add_argument(
-        "--shazam_coverart", type=str, default="", help="save shazam cover art too"
-    )
+    parser.add_argument("--shazam_coverart", type=str, default="", help="save shazam cover art too")
     parser.add_argument(
         "--netease",
         action="store_true",
@@ -174,9 +171,7 @@ if __name__ == "__main__":
         except TimestampMismatch:
             raise
     else:
-        logging.warning(
-            ("segmentation", media, "stopped to prevent posssible duplication")
-        )
+        logging.warning(("segmentation", media, "stopped to prevent posssible duplication"))
     logging.info(["segmentation", media, "successful"])
     if args.cleanup and os.path.isfile(media):
         os.remove(media)

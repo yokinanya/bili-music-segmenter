@@ -6,7 +6,7 @@ from collections.abc import Iterable
 
 import requests
 
-from segment.shazam import legalize_filename, recognize_files
+from segment.shazam import legalize_filename
 
 DEFAULT_TIMEOUT = 60
 AFP_DURATION = 3
@@ -60,6 +60,8 @@ async def neteasing(
             timeout=timeout,
         )
 
+    from segment.shazam import recognize_files
+
     await recognize_files(
         outdir,
         media,
@@ -72,9 +74,7 @@ async def neteasing(
 
 
 def netease_coverart(match, fn, outdir):
-    cover_url = _first_optional_text(
-        match, ("cover_url", "coverUrl", "picUrl", "albumPic")
-    )
+    cover_url = _first_optional_text(match, ("cover_url", "coverUrl", "picUrl", "albumPic"))
     if cover_url is None:
         return
     response = requests.get(cover_url, timeout=DEFAULT_TIMEOUT)
@@ -117,9 +117,7 @@ def _raise_if_rejected(title, rejects):
     title_text, artist_text = title
     for rejected_title, rejected_artist in parse_rejects(rejects):
         if title_text == rejected_title and artist_text == rejected_artist:
-            raise NetEaseRejectedMatch(
-                f"NetEase rejected known bad match: {title_text} by {artist_text}"
-            )
+            raise NetEaseRejectedMatch(f"NetEase rejected known bad match: {title_text} by {artist_text}")
 
 
 def _recognize_with_offsets(file, endpoint, cookie, offsets, timeout):

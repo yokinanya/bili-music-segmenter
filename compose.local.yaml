@@ -1,0 +1,48 @@
+services:
+  local:
+    build:
+      context: .
+      args:
+        DEPENDENCY_GROUP: local
+    volumes:
+      - ./input:/input:ro
+      - ./output:/output
+    depends_on:
+      netease:
+        condition: service_healthy
+    command:
+      - uv
+      - run
+      - --frozen
+      - --group
+      - local
+      - inaseg.py
+      - --media
+      - /input/input.mp4
+      - --outdir
+      - /output
+      - --netease
+      - --netease_endpoint
+      - http://netease:3000/audio/match
+
+  netease:
+    image: node:24-alpine
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3000"
+    command: ["npx", "--yes", "NeteaseCloudMusicApi@latest"]
+    volumes:
+      - netease-npm:/root/.npm
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/audio/match').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 5s
+      timeout: 5s
+      start_period: 60s
+      retries: 24
+
+volumes:
+  netease-npm:

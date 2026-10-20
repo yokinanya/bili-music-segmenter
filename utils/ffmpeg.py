@@ -1,12 +1,11 @@
+import logging
+import math
 import os
 import subprocess
 import tempfile
 from threading import Thread
-import logging
 
-import math
-
-from utils.timestamp import timestamp2sec, sec2timestamp
+from utils.timestamp import sec2timestamp, timestamp2sec
 
 
 def get_length(filename):
@@ -61,12 +60,12 @@ def split_in_half(
     cmds = [
         'ffmpeg -i "{}" {} -c:v copy -c:a copy "{}"'.format(
             filename,
-            "-to {}".format(str(length)),
+            f"-to {str(length)}",
             filename[: filename.rfind(".")] + "_a" + filename[filename.rfind(".") :],
         ),
         'ffmpeg -i "{}" {} -c:v copy -c:a copy "{}"'.format(
             filename,
-            "-ss {} ".format(str(length)),
+            f"-ss {str(length)} ",
             filename[: filename.rfind(".")] + "_b" + filename[filename.rfind(".") :],
         ),
     ]
@@ -104,14 +103,10 @@ def get_segment_process_length_array(filename: str, thres: int = 0):
     if thres > file_length:
         return [[None, None]]
     logging.debug(
-        (
-            f"filelength {str(file_length)} is \
+        f"filelength {str(file_length)} is \
         larger than thres {str(thres)}, triggering a segmentation."
-        )
     )
-    result = [
-        [x * thres, (x + 1) * thres] for x in range(math.ceil(file_length / thres))
-    ]
+    result = [[x * thres, (x + 1) * thres] for x in range(math.ceil(file_length / thres))]
     result[0][0] = None
     result[-1][1] = None
     return result

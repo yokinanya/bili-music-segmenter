@@ -69,9 +69,7 @@ def segment_wrapper(
                 sec2timestamp(i[1]),
             ]
         )
-        result += segment(
-            media, batch_size, energy_ratio, start_sec=i[0], stop_sec=i[1]
-        )
+        result += segment(media, batch_size, energy_ratio, start_sec=i[0], stop_sec=i[1])
         gc.collect()
         tf.keras.backend.clear_session()
     return result
@@ -179,9 +177,7 @@ def extract_mah_stuff(
             timestamps = fix_missing_stamps(timestamps, timestamps_ext)
             timestamps_ext = fix_missing_stamps(timestamps_ext, timestamps)
             if len(timestamps) != len(timestamps_ext):
-                raise TimestampMismatch(
-                    "check timestamp assist", timestamps, timestamps_ext
-                )
+                raise TimestampMismatch("check timestamp assist", timestamps, timestamps_ext)
         with open(r"D:\tmp\ytd\timstamp.ini", "w") as f:  # noqa: F841
             pass
     except FileNotFoundError:
@@ -212,9 +208,7 @@ def extract_mah_stuff(
             logging.info(f"{str(count).zfill(2)}: {x[0]} - {x[1]}")
     except Exception:
         pass
-    save_timestamps(
-        mediab=os.path.basename(media), key="timestamps", val=timestamps_ext
-    )
+    save_timestamps(mediab=os.path.basename(media), key="timestamps", val=timestamps_ext)
     nameswitch = False
     file = media
     filename = file[: file.rfind(".")]
@@ -243,9 +237,7 @@ def extract_mah_stuff(
                 ]
                 + encoding
                 + [
-                    os.path.join(
-                        oud, filename + f"_{str(i).zfill(2)}_{prefix}" + fileext
-                    ),
+                    os.path.join(oud, filename + f"_{str(i).zfill(2)}_{prefix}" + fileext),
                 ]
                 + encoding
             )
