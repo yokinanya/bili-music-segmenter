@@ -35,10 +35,11 @@ class UsageTotals:
         self._events: list[dict] = []
 
     def add(self, event: dict) -> None:
-        usage = event["usage"]
-        if usage is not None:
-            _tokens(usage)
+        # Validate inside the lock so a failing event never interleaves with a concurrent snapshot.
         with self._lock:
+            usage = event["usage"]
+            if usage is not None:
+                _tokens(usage)
             self._events.append(event)
 
     def snapshot(self) -> dict:
