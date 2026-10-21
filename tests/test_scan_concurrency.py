@@ -70,6 +70,53 @@ def test_scan_failures_propagate_and_cleanup(monkeypatch, workers):
     assert storage.upload.call_count == storage.delete.call_count
 
 
+def test_first_failure_stops_sending_further_chunks(monkeypatch):
+    storage = Mock()
+    monkeypatch.setattr(detection, "media_duration", lambda _: 40)
+    monkeypatch.setattr(detection, "extract_wav", lambda *args: None)
+    calls = []
+    lock = Lock()
+
+    def call(*args):
+        with lock:
+            calls.append(args)
+        if len(calls) == 1:
+            raise RuntimeError("API failure")
+        return {"data": {"segments": []}, "usage": None}
+
+    monkeypatch.setattr(detection, "audio_model_call", call)
+    with pytest.raises(RuntimeError, match="API failure"):
+        detection.scan_candidates(
+            Path("input.mp4"),
+            None,
+            storage,
+            chunk_seconds=10,
+            chunk_context=0,
+            s3_prefix="test",
+            model="test",
+            scan_concurrency=1,
+        )
+    # Serial execution must give up right after the failing chunk instead of scanning the rest.
+    assert len(calls) == 1
+    assert storage.upload.call_count == storage.delete.call_count
+
+
+def test_border_candidates_are_merged_not_reviewed_twice():
+    # Two adjacent chunks report the same song with a slightly different start.
+    first = detection.Candidate(1, 100, 400, "host_singing", 0.9, True, "", "")
+    second = detection.Candidate(2, 397, 460, "host_singing", 0.9, True, "", "")
+    merged = detection.merge_candidates([first, second], max_gap=detection.BORDER_DUPLICATE_SECONDS)
+    assert len(merged) == 1
+    assert (merged[0].start, merged[0].end) == (100, 460)
+
+
+def test_merge_keeps_genuinely_different_songs():
+    first = detection.Candidate(1, 100, 200, "host_singing", 0.9, True, "", "")
+    second = detection.Candidate(2, 260, 360, "host_singing", 0.9, True, "", "")
+    merged = detection.merge_candidates([first, second], max_gap=detection.BORDER_DUPLICATE_SECONDS)
+    assert [(item.start, item.end) for item in merged] == [(100, 200), (260, 360)]
+
+
 def test_uploads_do_not_overwrite_each_other():
     progress = UploadProgress()
     first = {"key": "first", "total_bytes": 100, "transferred_bytes": 10, "state": "uploading"}

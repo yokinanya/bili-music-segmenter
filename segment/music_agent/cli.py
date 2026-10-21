@@ -7,8 +7,11 @@ import asyncio
 import logging
 from pathlib import Path
 
+from segment.logs import agent_log_path, configure_logging
 from segment.music_agent.agent import run_agent
 from segment.music_agent.settings import apply_environment
+
+LOGGER = logging.getLogger(__name__)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,7 +27,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--minimum-candidate-seconds", type=float, default=30)
     parser.add_argument("--minimum-singing-seconds", type=float, default=30)
     parser.add_argument("--minimum-confidence", type=float, default=0.85)
-    parser.add_argument("--merge-gap", type=float, default=10)
     parser.add_argument("--title-model", default="qwen3.8-flash")
     parser.add_argument("--summary-model", default="qwen3.8-flash")
     parser.add_argument("--no-title-model", action="store_true", help="不使用第二个文本模型处理识曲冲突")
@@ -48,12 +50,11 @@ def main() -> None:
         parser.error("--minimum-confidence 必须大于 0 且不超过 1")
     if args.minimum_candidate_seconds <= 0 or args.minimum_singing_seconds <= 0:
         parser.error("最短候选和最短演唱时长必须大于 0")
-    if args.merge_gap < 0 or args.recognizer_timeout <= 0:
-        parser.error("合并间隔不能为负，识曲超时必须为正")
-    logging.basicConfig(
-        level=getattr(logging, args.log_level),
-        format="%(asctime)s %(levelname)s %(message)s",
-    )
+    if args.recognizer_timeout <= 0:
+        parser.error("识曲超时必须为正")
+    log_file = agent_log_path(args.media)
+    configure_logging(getattr(logging, args.log_level), log_file=log_file)
+    LOGGER.info("Processing log: %s", log_file)
     manifest = asyncio.run(
         run_agent(
             args.media,
@@ -65,7 +66,6 @@ def main() -> None:
             minimum_candidate_seconds=args.minimum_candidate_seconds,
             minimum_singing_seconds=args.minimum_singing_seconds,
             minimum_confidence=args.minimum_confidence,
-            merge_gap_seconds=args.merge_gap,
             use_title_model=not args.no_title_model,
             title_model=args.title_model,
             summary_model=args.summary_model,
@@ -76,6 +76,7 @@ def main() -> None:
             recognizer_timeout=args.recognizer_timeout,
         )
     )
+    LOGGER.info("Manifest written to %s", manifest)
     print(manifest)
 
 

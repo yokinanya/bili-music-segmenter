@@ -24,6 +24,25 @@ def test_same_song_group_includes_interlude_and_short_tail():
     assert len(audit["boundary_attempts"]) == 1
 
 
+def test_media_tail_reported_with_rounding_does_not_expand_forever():
+    # ffprobe durations are approximate: an interval ending 0.04s before the media end is already at the tail.
+    request = Mock(return_value=response([(20, 96.0)], song_groups=[[0]]))
+    intervals, audit = review_boundaries(BoundaryOptions(20, 90, 96.04, 20, 0.85), request)
+    assert intervals == [(20, 96)]
+    assert len(audit["boundary_attempts"]) == 1
+    assert audit["media_end_reached"] is True
+
+
+def test_expansion_stops_once_the_whole_media_is_listened():
+    def whole_input(audio_start, audio_end):
+        return response([(0, audio_end - audio_start)], song_groups=[[0]], clipped_start=True, clipped_end=True)
+
+    request = Mock(side_effect=whole_input)
+    intervals, audit = review_boundaries(BoundaryOptions(100, 200, 1000, 20, 0.85), request)
+    assert intervals == [(0, 1000)]
+    assert len(audit["boundary_attempts"]) < 8
+
+
 def test_touching_left_edge_expands_until_actual_start():
     request = Mock(side_effect=[response([(0, 100)]), response([(10, 120)])])
     intervals, audit = review_boundaries(BoundaryOptions(100, 200, 1000, 20, 0.85), request)

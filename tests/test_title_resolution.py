@@ -1,5 +1,7 @@
 import asyncio
+import time
 from pathlib import Path
+from threading import Lock
 from unittest.mock import Mock
 
 import pytest
@@ -32,6 +34,61 @@ def test_shazam_no_match_reaches_agent_status(monkeypatch):
         )
     )
     assert result["shazam"] == {"status": "no_match"}
+
+
+def test_recognizers_run_concurrently(monkeypatch):
+    from segment.music_agent import recognition
+
+    started, finished = [], []
+    lock = Lock()
+
+    async def slow_shazam(*args, **kwargs):
+        with lock:
+            started.append(time.monotonic())
+        await asyncio.sleep(0.4)
+        with lock:
+            finished.append(time.monotonic())
+        return None
+
+    async def slow_netease(*args, **kwargs):
+        with lock:
+            started.append(time.monotonic())
+        time.sleep(0.4)
+        with lock:
+            finished.append(time.monotonic())
+        return None
+
+    monkeypatch.setattr(recognition, "shazam_orig", slow_shazam)
+    monkeypatch.setattr(recognition, "netease_orig", slow_netease)
+    begin = time.monotonic()
+    result = asyncio.run(
+        recognition.recognize_audio(
+            Path("audio.wav"),
+            netease_endpoint="http://localhost:3000",
+            timeout=5,
+        )
+    )
+    elapsed = time.monotonic() - begin
+    # Sequential providers would need ~0.8s; concurrent execution finishes both in roughly one wait.
+    assert elapsed < 0.7
+    assert max(started) < min(finished)
+    assert result["shazam"]["status"] == "no_match"
+    assert result["netease"]["status"] == "no_match"
+
+
+def test_recognizer_base_exception_is_reported_not_raised(monkeypatch):
+    from segment.music_agent import recognition
+    from segment.shazam import KoreanCharException
+
+    async def korean(*args, **kwargs):
+        raise KoreanCharException("韩文歌名")
+
+    monkeypatch.setattr(recognition, "shazam_orig", korean)
+    result = asyncio.run(
+        recognition.recognize_audio(Path("audio.wav"), netease_endpoint="http://localhost:3000", use_netease=False)
+    )
+    assert result["shazam"]["status"] == "error"
+    assert "KoreanCharException" in result["shazam"]["error"]
 
 
 def test_conflict_and_romanized_names_need_audio():

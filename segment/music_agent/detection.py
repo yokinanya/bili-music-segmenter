@@ -6,7 +6,7 @@ import logging
 import math
 import tempfile
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass
 from functools import partial
 from pathlib import Path
@@ -68,27 +68,28 @@ def parse_candidates(data: dict[str, Any], absolute_offset: float) -> list[Candi
     return candidates
 
 
-def merge_candidates(candidates: list[Candidate], max_gap: float) -> list[Candidate]:
+# Adjacent chunks can disagree by a few seconds on where a song starts; treat such reports as one song.
+OVERLAP_TOLERANCE_SECONDS = 0.5
+BORDER_DUPLICATE_SECONDS = 5.0
+
+
+def merge_candidates(candidates: list[Candidate], max_gap: float = 0) -> list[Candidate]:
+    """Merge candidates that overlap, so border disagreements are not reviewed and recognized twice.
+
+    ``max_gap`` additionally merges candidates separated by at most that many seconds.
+    """
     ordered = sorted(candidates, key=lambda item: (item.start, item.end))
     merged: list[Candidate] = []
     for candidate in ordered:
-        if (
-            merged
-            and candidate.start < merged[-1].end
-            and candidate.classification == merged[-1].classification
-            and candidate.title_hint == merged[-1].title_hint
-        ):
+        near = merged and candidate.start < merged[-1].end + max(OVERLAP_TOLERANCE_SECONDS, max_gap)
+        if near and _same_song(merged[-1], candidate):
             previous = merged[-1]
             classes = {previous.classification, candidate.classification}
             merged[-1] = Candidate(
                 index=0,
                 start=previous.start,
                 end=max(previous.end, candidate.end),
-                classification=(
-                    "mixed_singing_and_chat"
-                    if len(classes) > 1 or "mixed_singing_and_chat" in classes
-                    else previous.classification
-                ),
+                classification="mixed_singing_and_chat" if len(classes) > 1 else previous.classification,
                 confidence=min(previous.confidence, candidate.confidence),
                 host_singing_present=(previous.host_singing_present or candidate.host_singing_present),
                 title_hint=previous.title_hint or candidate.title_hint,
@@ -96,9 +97,20 @@ def merge_candidates(candidates: list[Candidate], max_gap: float) -> list[Candid
             )
         else:
             merged.append(candidate)
+    return _reindex(merged)
+
+
+def _same_song(first: Candidate, second: Candidate) -> bool:
+    """Only merge when the reports can be the same song; different titles always stay separate songs."""
+    if first.title_hint and second.title_hint:
+        return first.title_hint == second.title_hint
+    return first.classification == second.classification
+
+
+def _reindex(candidates: list[Candidate]) -> list[Candidate]:
     return [
         Candidate(index=index, **{key: value for key, value in asdict(item).items() if key != "index"})
-        for index, item in enumerate(merged, start=1)
+        for index, item in enumerate(candidates, start=1)
     ]
 
 
@@ -128,29 +140,59 @@ def scan_candidates(
     windows = make_windows(media_duration(media), chunk_seconds, chunk_context)
     context = ScanContext(media, client, storage, s3_prefix, model, uuid.uuid4().hex)
     worker = partial(_scan_window, context)
+    results: dict[int, tuple[list[Candidate], dict]] = {}
     with ThreadPoolExecutor(max_workers=scan_concurrency) as executor:
-        results = list(executor.map(worker, enumerate(windows, 1)))
-    candidates = [candidate for current, _ in results for candidate in current]
-    metadata = [record for _, record in results]
-    return merge_candidates(candidates, max_gap=0), metadata
+        # Submit lazily: after a failure no further chunk is extracted, uploaded or sent to the model.
+        slots: list = []
+        submitted: dict[object, int] = {}
+        queued = iter(enumerate(windows, 1))
+        while len(slots) < scan_concurrency:
+            item = next(queued, None)
+            if item is None:
+                break
+            future = executor.submit(worker, item)
+            slots.append(future)
+            submitted[future] = item[0]
+        while slots:
+            done, _ = wait(slots, return_when=FIRST_COMPLETED)
+            for future in done:
+                slots.remove(future)
+                if future.exception() is not None:
+                    for other in slots:
+                        other.cancel()
+                    raise future.exception()
+                results[submitted[future]] = future.result()
+                item = next(queued, None)
+                if item is not None:
+                    future = executor.submit(worker, item)
+                    slots.append(future)
+                    submitted[future] = item[0]
+    ordered = [results[index] for index in sorted(results)]
+    candidates = [candidate for current, _ in ordered for candidate in current]
+    metadata = [record for _, record in ordered]
+    return _reindex(merge_candidates(candidates, max_gap=BORDER_DUPLICATE_SECONDS)), metadata
 
 
 def _scan_window(context: ScanContext, item: tuple) -> tuple[list[Candidate], dict]:
     chunk_index, (core_start, core_end, audio_start, audio_end) = item
     with tempfile.TemporaryDirectory(prefix="music-scan-") as directory:
         wav = Path(directory) / "chunk.wav"
-        extract_wav(context.media, audio_start, audio_end, wav)
+        # Upload only the core range: the surrounding context of every chunk was already another chunk's core.
+        extract_wav(context.media, core_start, core_end, wav)
         key = "/".join(filter(None, (context.prefix, context.run_id, f"scan-{chunk_index:04d}.wav")))
         context.storage.upload(key, wav)
         try:
             audio_url = context.storage.signed_url(key)
-            prompt = (
-                f"{SCAN_PROMPT}\n核心范围是输入音频 {core_start - audio_start:.2f}-"
-                f"{core_end - audio_start:.2f} 秒；只记录起点在核心范围的音乐候选。"
+            response = audio_model_call(context.client, context.model, SCAN_PROMPT, audio_url)
+            found = parse_candidates(response["data"], core_start)
+            current = [candidate for candidate in found if candidate.start < core_end]
+            LOGGER.info(
+                "Scanned chunk %d: input %.0f-%.0fs, %d candidates",
+                chunk_index,
+                core_start,
+                core_end,
+                len(current),
             )
-            response = audio_model_call(context.client, context.model, prompt, audio_url)
-            found = parse_candidates(response["data"], audio_start)
-            current = [candidate for candidate in found if core_start <= candidate.start < core_end]
             record = {
                 "chunk": chunk_index,
                 "core_start": core_start,
@@ -158,7 +200,6 @@ def _scan_window(context: ScanContext, item: tuple) -> tuple[list[Candidate], di
                 "candidate_count": len(current),
                 "usage": response["usage"],
             }
-            LOGGER.info("Scanned chunk %d", chunk_index)
             return current, record
         finally:
             context.storage.delete(key)
@@ -198,13 +239,3 @@ def refine_candidate(
         )
 
     return review_boundaries(options, request)
-
-
-def merge_intervals(intervals: list[tuple[float, float]], max_gap: float) -> list[tuple[float, float]]:
-    merged: list[list[float]] = []
-    for start, end in sorted(intervals):
-        if merged and start - merged[-1][1] <= max_gap:
-            merged[-1][1] = max(merged[-1][1], end)
-        else:
-            merged.append([start, end])
-    return [(start, end) for start, end in merged]

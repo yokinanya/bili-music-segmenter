@@ -1,4 +1,4 @@
-from segment.music_agent.detection import Candidate, merge_candidates, merge_intervals, parse_candidates
+from segment.music_agent.detection import Candidate, merge_candidates, parse_candidates
 from segment.music_agent.export import make_clip_path, safe_component
 from segment.music_agent.recognition import deterministic_title_choice, normalize_title
 
@@ -28,13 +28,6 @@ def test_adjacent_songs_and_background_are_not_merged():
         Candidate(0, 35, 60, "background_music_chat", 0.9, False, "", "聊天"),
     ]
     assert len(merge_candidates(candidates, max_gap=10)) == 3
-
-
-def test_merge_singing_intervals_only_inside_gap_threshold():
-    assert merge_intervals([(10, 20), (27, 35), (50, 80)], max_gap=10) == [
-        (10, 35),
-        (50, 80),
-    ]
 
 
 def test_title_normalization_handles_spaces_and_fullwidth_characters():

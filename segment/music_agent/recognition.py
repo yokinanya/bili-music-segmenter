@@ -5,16 +5,17 @@ from __future__ import annotations
 import asyncio
 import re
 import unicodedata
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from opencc import OpenCC
 
 from segment.netease import netease_orig
-from segment.shazam import KoreanCharException, shazam_orig
+from segment.shazam import shazam_orig
 
 
-def _outcome(result: tuple[Any, Any] | None, error: Exception | None) -> dict[str, Any]:
+def _outcome(result: tuple[Any, Any] | None, error: BaseException | None) -> dict[str, Any]:
     if error is not None:
         return {"status": "error", "error": f"{type(error).__name__}: {str(error)[:300]}"}
     if result is None:
@@ -35,38 +36,37 @@ async def recognize_audio(
     use_shazam: bool = True,
     use_netease: bool = True,
 ) -> dict[str, Any]:
-    shazam_result = None
-    netease_result = None
-    shazam_error = None
-    netease_error = None
+    """Query both recognizers concurrently, so one slow provider does not double the per-interval wait."""
+    runners: dict[str, Callable[[], dict[str, Any]]] = {}
     if use_shazam:
-        try:
-            shazam_result = await asyncio.wait_for(shazam_orig(str(audio)), timeout=timeout)
-        except KoreanCharException as error:
-            shazam_error = ValueError(str(error))
-        except Exception as error:  # noqa: BLE001 - provider errors are reported independently
-            shazam_error = error
+        runners["shazam"] = lambda: _shazam_blocking(str(audio), timeout)
     if use_netease:
-        try:
-            netease_result = await asyncio.to_thread(
-                lambda: asyncio.run(
-                    netease_orig(
-                        str(audio),
-                        endpoint=netease_endpoint,
-                        cookie=netease_cookie,
-                        rejects=(),
-                        timeout=timeout,
-                    )
-                )
-            )
-        except KoreanCharException as error:
-            netease_error = ValueError(str(error))
-        except Exception as error:  # noqa: BLE001 - provider errors are reported independently
-            netease_error = error
+        runners["netease"] = lambda: _netease_blocking(str(audio), netease_endpoint, netease_cookie, timeout)
+    results = await asyncio.gather(*(asyncio.to_thread(run) for run in runners.values()))
+    outcome = dict(zip(runners, results, strict=True))
+    # A disabled provider stays explicitly disabled so the record never looks like a failed match.
     return {
-        "shazam": _outcome(shazam_result, shazam_error) if use_shazam else {"status": "disabled"},
-        "netease": _outcome(netease_result, netease_error) if use_netease else {"status": "disabled"},
+        "shazam": outcome.get("shazam", {"status": "disabled"}),
+        "netease": outcome.get("netease", {"status": "disabled"}),
     }
+
+
+def _shazam_blocking(audio: str, timeout: int) -> dict[str, Any]:
+    try:
+        return _outcome(asyncio.run(asyncio.wait_for(shazam_orig(audio), timeout=timeout)), None)
+    except BaseException as error:  # noqa: BLE001 - Korean titles and provider errors are both reported
+        return _outcome(None, error)
+
+
+def _netease_blocking(audio: str, endpoint: str, cookie: str, timeout: int) -> dict[str, Any]:
+    """``netease_orig`` is fully blocking (ffmpeg + node + requests), hence the worker thread."""
+    try:
+        return _outcome(
+            asyncio.run(netease_orig(audio, endpoint=endpoint, cookie=cookie, rejects=(), timeout=timeout)),
+            None,
+        )
+    except BaseException as error:  # noqa: BLE001 - Korean titles and provider errors are both reported
+        return _outcome(None, error)
 
 
 def normalize_title(value: str) -> str:
@@ -96,11 +96,18 @@ def deterministic_title_choice(
     return "", "", "unmatched"
 
 
+MINIMUM_TEXT_TITLE_CONFIDENCE = 0.85
+
+
 def resolve_title_with_model(references: dict[str, Any], model_result: dict[str, Any]) -> tuple[str, str, str]:
+    """Pick a provider using the text reviewer's verdict; the caller still decides whether audio is needed."""
     choice = model_result.get("choice")
     if choice not in {"shazam", "netease", "unresolved"}:
         raise ValueError(f"Invalid Qwen title choice: {choice}")
-    if choice == "unresolved" or float(model_result.get("confidence", 0)) < 0.85:
+    confidence = model_result.get("confidence")
+    if type(confidence) not in (int, float) or not 0 <= confidence <= 1:
+        raise ValueError("文本标题裁决置信度无效")
+    if choice == "unresolved" or confidence < MINIMUM_TEXT_TITLE_CONFIDENCE:
         return "", "", "unresolved"
     selected = references.get(choice, {})
     if selected.get("status") != "matched":

@@ -8,6 +8,9 @@ from dataclasses import dataclass
 
 CONTEXT_GROWTH = 2
 MINIMUM_CONTEXT_SECONDS = 20
+# ffprobe reports an approximate duration; compare media edges with a tolerance instead of equality.
+EDGE_TOLERANCE_SECONDS = 0.25
+MAX_ATTEMPTS = 8
 GROUPING_PROMPT = """\n本次是完整单曲边界复核，必须额外返回 song_groups 数组和 clipped_start、clipped_end 布尔值。
 intervals 按时间顺序列出演唱区间；song_groups 每项为属于同一次完整歌曲表演的 intervals 零起始编号数组。
 仅有声学证据证明中间为同曲间奏、换气、短暂插话时将区间分到同组；换歌或独立聊天必须分组。
@@ -29,7 +32,7 @@ class BoundaryOptions:
 def review_boundaries(options: BoundaryOptions, request: Callable) -> tuple[list[tuple[float, float]], dict]:
     context = max(options.context, 0)
     history = []
-    while True:
+    for _ in range(MAX_ATTEMPTS):
         start = max(0.0, options.start - context)
         end = min(options.duration, options.end + context)
         response = request(start, end)
@@ -37,16 +40,29 @@ def review_boundaries(options: BoundaryOptions, request: Callable) -> tuple[list
         intervals = _parse_intervals(data, end - start, options.minimum_confidence)
         grouped = _group_intervals(intervals, data)
         history.append({"input_start": start, "input_end": end, "response": response})
-        left = bool(intervals) and (grouped[0][0] == 0 or data.get("clipped_start") is True)
-        right = bool(intervals) and (grouped[-1][1] == end - start or data.get("clipped_end") is True)
-        if not ((left and start > 0) or (right and end < options.duration)):
+        left = bool(intervals) and (_at_start(grouped[0][0]) or data.get("clipped_start") is True)
+        right = bool(intervals) and (_at_end(grouped[-1][1], end - start) or data.get("clipped_end") is True)
+        if not ((left and not _at_start(start)) or (right and not _at_media_end(end, options.duration))):
             return [(start + a, start + b) for a, b in grouped], {
                 **response,
                 "boundary_attempts": history,
-                "media_start_reached": left and start == 0,
-                "media_end_reached": right and end == options.duration,
+                "media_start_reached": left and _at_start(start),
+                "media_end_reached": right and _at_media_end(end, options.duration),
             }
         context = min(options.duration, max(MINIMUM_CONTEXT_SECONDS, context * CONTEXT_GROWTH))
+    raise ValueError(f"边界复核在 {MAX_ATTEMPTS} 次扩张后仍未找到歌曲边界")
+
+
+def _at_start(value: float) -> bool:
+    return value <= EDGE_TOLERANCE_SECONDS
+
+
+def _at_end(value: float, audio_duration: float) -> bool:
+    return value >= audio_duration - EDGE_TOLERANCE_SECONDS
+
+
+def _at_media_end(value: float, media_duration: float) -> bool:
+    return value >= media_duration - EDGE_TOLERANCE_SECONDS
 
 
 def _parse_intervals(data: dict, duration: float, confidence_threshold: float) -> list[tuple[float, float]]:

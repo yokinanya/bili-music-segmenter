@@ -22,11 +22,13 @@ class ReviewContext:
     prefix: str
     context_seconds: float
     minimum_confidence: float
-    merge_gap: float
     minimum_seconds: float
 
 
-def audit_results(records: list[dict], context: ReviewContext, *, text_call: Callable, refine: Callable) -> list[dict]:
+def audit_results(
+    records: list[dict], context: ReviewContext, *, text_call: Callable, refine: Callable
+) -> tuple[list[dict], dict]:
+    """Return the audited records and the single run-wide summary, kept out of individual records."""
     payload = [
         {key: value for key, value in record.items() if key != "superseded_singing_intervals"} for record in records
     ]
@@ -38,22 +40,25 @@ def audit_results(records: list[dict], context: ReviewContext, *, text_call: Cal
     requests = _validate_requests(response["data"], records)
     corrected = json.loads(json.dumps(records, ensure_ascii=False))
     by_index = {record["index"]: record for record in corrected}
-    for record in corrected:
-        record["final_summary"] = response
     for request in requests:
         record = by_index[request["candidate_index"]]
         candidate = Candidate(**{name: record[name] for name in Candidate.__dataclass_fields__})
-        intervals, boundary = refine(
-            context.media,
-            candidate,
-            context.client,
-            context.storage,
-            context_seconds=request["context_seconds"],
-            s3_prefix=context.prefix,
-            model=context.audio_model,
-            minimum_confidence=context.minimum_confidence,
-            review_instruction=request["reason"],
-        )
+        try:
+            intervals, boundary = refine(
+                context.media,
+                candidate,
+                context.client,
+                context.storage,
+                context_seconds=request["context_seconds"],
+                s3_prefix=context.prefix,
+                model=context.audio_model,
+                minimum_confidence=context.minimum_confidence,
+                review_instruction=request["reason"],
+            )
+        except ValueError as exc:
+            # A failed recheck must not discard the already prepared boundaries; keep them and record why.
+            record["final_audio_review"] = {"request": request, "error": str(exc)}
+            continue
         record["initial_singing_intervals"] = record.get("singing_intervals", [])
         record["final_audio_review"] = {"request": request, "response": boundary}
         record["singing_intervals"] = [
@@ -62,7 +67,7 @@ def audit_results(records: list[dict], context: ReviewContext, *, text_call: Cal
             if end - start >= context.minimum_seconds
         ]
         record["decision"] = "reviewed" if record["singing_intervals"] else "no_confident_singing"
-    return corrected
+    return corrected, response
 
 
 def _validate_requests(data: dict, records: list[dict]) -> list[dict]:

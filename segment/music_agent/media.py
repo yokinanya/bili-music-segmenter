@@ -5,6 +5,9 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+RECOGNITION_SAMPLE_RATE = 44100
+RECOGNITION_BITRATE = "128k"
+
 
 def run_command(command: list[str]) -> str:
     return subprocess.run(command, check=True, capture_output=True, text=True).stdout.strip()
@@ -73,6 +76,35 @@ def extract_wav(media: Path, start: float, end: float, destination: Path) -> Non
             "pcm_s16le",
             "-f",
             "wav",
+            str(destination),
+        ]
+    )
+
+
+def extract_recognition_audio(media: Path, start: float, end: float, destination: Path) -> None:
+    """Extract the single audio form used by every recognizer pass, so results stay comparable."""
+    run_command(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-ss",
+            f"{start:.3f}",
+            "-i",
+            str(media),
+            "-t",
+            f"{end - start:.3f}",
+            "-map",
+            "0:a:0",
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            str(RECOGNITION_SAMPLE_RATE),
+            "-b:a",
+            RECOGNITION_BITRATE,
             str(destination),
         ]
     )
