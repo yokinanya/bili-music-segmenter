@@ -4,6 +4,7 @@ import logging
 import os
 import tempfile
 
+from segment.logs import configure_logging, inaseg_log_path
 from segment.netease import netease_coverart, netease_orig, neteasing
 from segment.segment import (
     SEGMENT_THRES,
@@ -118,11 +119,7 @@ if __name__ == "__main__":
             requires ~6GB VRAM), set this to process streams in \
                 this speficied segments to avoid ram overflow. in seconds.",
     )
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(asctime)s %(levelname)-8s %(message)s",
-        handlers=[logging.FileHandler("./inaseg_inst.log"), logging.StreamHandler()],
-    )
+    configure_logging(logging.DEBUG, log_file=inaseg_log_path())
     args = parser.parse_args()
     if args.media is not None:
         media = args.media
