@@ -4,6 +4,10 @@
 .venv
 input
 output
+logs
+webui/node_modules
+webui/.next
+webui/out
 __pycache__
 **/__pycache__
 .pytest_cache

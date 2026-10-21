@@ -7,23 +7,15 @@ services:
     volumes:
       - ./input:/input:ro
       - ./output:/output
+      - ./logs:/logs
     depends_on:
       netease:
         condition: service_healthy
-    command:
-      - uv
-      - run
-      - --frozen
-      - --group
-      - local
-      - inaseg.py
-      - --media
-      - /input/input.mp4
-      - --outdir
-      - /output
-      - --netease
-      - --netease_endpoint
-      - http://netease:3000/audio/match
+    # Process the first media file of the fixed input directory so a new file does not need a compose edit.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - exec uv run --frozen --group local inaseg.py --media "$$(ls /input/*.{mp4,mkv,flv,ts,mov,m4v,webm,mp3,m4a,aac,wav,flac,ogg} | head -n 1)" --outdir /output --netease --netease_endpoint http://netease:3000/audio/match
 
   netease:
     image: node:24-alpine

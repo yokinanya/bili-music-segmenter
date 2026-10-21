@@ -14,6 +14,7 @@ services:
     volumes:
       - ./input:/input:ro
       - ./output:/output
+      - ./logs:/logs
     depends_on:
       netease:
         condition: service_healthy

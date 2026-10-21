@@ -20,9 +20,18 @@ dist/
 cookies.json
 ytdlp_cookies.txt
 
+# Frontend build tooling
+webui/node_modules/
+webui/.next/
+webui/out/
+webui/next-env.d.ts
+webui/tsconfig.tsbuildinfo
+
 # Generated output and runtime state
-/input/
+/input/*
+!/input/.gitkeep
 /output/
+/logs/
 *.log
 *.sqlite
 *.sqlite3
