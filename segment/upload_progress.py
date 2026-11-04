@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from threading import Lock
 
 from segment.events import emit_event
 
 UPLOAD_PREFIX = "__MUSIC_AGENT_UPLOAD__"
+PROGRESS_INTERVAL_SECONDS = 0.25
 
 
 @dataclass
@@ -27,12 +29,16 @@ class UploadProgress:
 class UploadReporter:
     def __init__(self, key: str, total_bytes: int) -> None:
         self._lock = Lock()
+        self._last = 0.0
         self._event = {"key": key, "total_bytes": total_bytes, "transferred_bytes": 0, "state": "uploading"}
 
     def __call__(self, byte_count: int) -> None:
         with self._lock:
             self._event["transferred_bytes"] += byte_count
-            self._emit()
+            moment = time.monotonic()
+            if moment - self._last >= PROGRESS_INTERVAL_SECONDS:
+                self._last = moment
+                self._emit()
 
     def state(self, state: str) -> None:
         with self._lock:

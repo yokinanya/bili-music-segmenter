@@ -6,6 +6,8 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from segment.music_agent.runtime import checkpoint
+
 CONTEXT_GROWTH = 2
 MINIMUM_CONTEXT_SECONDS = 20
 # ffprobe reports an approximate duration; compare media edges with a tolerance instead of equality.
@@ -35,10 +37,13 @@ def review_boundaries(options: BoundaryOptions, request: Callable) -> tuple[list
     for _ in range(MAX_ATTEMPTS):
         start = max(0.0, options.start - context)
         end = min(options.duration, options.end + context)
-        response = request(start, end)
+        checked = checkpoint(
+            "边界复核",
+            {"start": start, "end": end, "options": options.__dict__},
+            lambda: _checked_response(request, start, end, options.minimum_confidence),
+        )
+        response, intervals, grouped = checked
         data = response["data"]
-        intervals = _parse_intervals(data, end - start, options.minimum_confidence)
-        grouped = _group_intervals(intervals, data)
         history.append({"input_start": start, "input_end": end, "response": response})
         left = bool(intervals) and (_at_start(grouped[0][0]) or data.get("clipped_start") is True)
         right = bool(intervals) and (_at_end(grouped[-1][1], end - start) or data.get("clipped_end") is True)
@@ -96,3 +101,9 @@ def _group_intervals(intervals: list[tuple[float, float]], data: dict) -> list[t
     if any(type(index) is not int for index in indices) or indices != list(range(len(intervals))):
         raise ValueError("song_groups 必须按时间连续覆盖每个区间且不得重复")
     return [(intervals[group[0]][0], intervals[group[-1]][1]) for group in groups]
+
+
+def _checked_response(request, start: float, end: float, threshold: float) -> list:
+    response = request(start, end)
+    intervals = _parse_intervals(response["data"], end - start, threshold)
+    return [response, intervals, _group_intervals(intervals, response["data"])]

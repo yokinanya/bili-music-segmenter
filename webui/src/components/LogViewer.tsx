@@ -1,91 +1,30 @@
 'use client';
-
-import { useEffect, useMemo, useRef, useState } from 'react';
-
-interface Props {
-  text: string;
-  /** Whether the producer is still writing; controls the "follow" hint. */
-  streaming: boolean;
-  title: string;
-}
-
-const ERROR_LINE = /\b(ERROR|CRITICAL)\b|Traceback|Error:|错误/;
-
-/** Renders incrementally: only the new tail is parsed, so long logs stay responsive. */
-export function LogViewer({ text, streaming, title }: Props) {
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { api } from '@/lib/api';
+import { errorText } from '@/lib/format';
+import { Button } from './Material';
+const POLL_MS = 1000;
+export function LogViewer({ jobId, index }: { jobId: string; index: number }) {
+  const [text, setText] = useState(''), [error, setError] = useState(''), [revision, setRevision] = useState(0);
   const [follow, setFollow] = useState(true);
-  const [autoScroll, setAutoScroll] = useState(true);
-  const boxRef = useRef<HTMLPreElement>(null);
-  const rendered = useRef(0);
-  const [lines, setLines] = useState<{ text: string; error: boolean }[]>([]);
-
+  const box = useRef<HTMLPreElement>(null);
+  const retry = useCallback(() => setRevision((value) => value + 1), []);
   useEffect(() => {
-    if (text.length < rendered.current) {
-      // The log was replaced (new job or a reset): rebuild instead of appending a stale tail.
-      rendered.current = 0;
-      setLines([]);
-    }
-    if (text.length === rendered.current) return;
-    const tail = text.slice(rendered.current);
-    rendered.current = text.length;
-    const parts = tail.split('\n');
-    // The last part may still be an unfinished line; keep it until the next chunk completes it.
-    const complete = parts.slice(0, -1);
-    setLines((previous) => [
-      ...previous,
-      ...complete.map((line) => ({ text: line, error: ERROR_LINE.test(line) })),
-    ]);
-  }, [text]);
-
-  const body = useMemo(() => lines, [lines]);
-
-  useEffect(() => {
-    if (!autoScroll) return;
-    const box = boxRef.current;
-    if (box) box.scrollTop = box.scrollHeight;
-  }, [body, autoScroll]);
-
-  const onScroll = () => {
-    const box = boxRef.current;
-    if (!box) return;
-    const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 24;
-    setAutoScroll(atBottom);
-    setFollow(atBottom);
-  };
-
-  const jumpToEnd = () => {
-    const box = boxRef.current;
-    if (!box) return;
-    box.scrollTop = box.scrollHeight;
-    setAutoScroll(true);
-    setFollow(true);
-  };
-
-  return (
-    <div className="log-wrap">
-      <div className="log-head">
-        <span className="muted small">{title}</span>
-        <span className="muted small" aria-live="polite">
-          {streaming && follow ? '正在跟随最新输出' : streaming ? '已暂停跟随' : '输出结束'}
-        </span>
-        {!follow && streaming && (
-          <button type="button" className="btn ghost small" onClick={jumpToEnd}>
-            跳到最新
-          </button>
-        )}
-      </div>
-      <pre className="log" ref={boxRef} onScroll={onScroll} tabIndex={0} aria-label={title}>
-        {body.length === 0 ? (
-          <span className="muted">等待进程输出…</span>
-        ) : (
-          body.map((line, index) => (
-            <span key={index} className={line.error ? 'log-line log-error' : 'log-line'}>
-              {line.text}
-              {'\n'}
-            </span>
-          ))
-        )}
-      </pre>
-    </div>
-  );
+    let alive = true, offset = 0, timer: ReturnType<typeof setTimeout>;
+    setText(''); setError('');
+    const poll = async () => {
+      try {
+        const result = await api.log(jobId, index, offset);
+        if (!alive) return;
+        offset = result.offset; setText((value) => value + result.text); setError('');
+        if (!result.complete) timer = setTimeout(poll, POLL_MS);
+      } catch (cause) { if (alive) setError(errorText(cause)); }
+    };
+    void poll(); return () => { alive = false; clearTimeout(timer); };
+  }, [jobId, index, revision]);
+  useEffect(() => { if (follow && box.current) box.current.scrollTop = box.current.scrollHeight; }, [text, follow]);
+  return <div className="log-wrap"><div className="section-head"><h3>执行日志</h3><Button variant="text" onClick={() => setFollow(!follow)}>{follow ? '暂停跟随' : '跟随最新'}</Button></div>
+    {error && <div className="error">{error}<Button onClick={retry}>重新读取日志</Button></div>}
+    <pre ref={box} className="log" tabIndex={0} aria-label="执行日志" onScroll={(event) => { const node = event.currentTarget; setFollow(node.scrollTop + node.clientHeight >= node.scrollHeight - 24); }}>{text || '等待进程输出…'}</pre>
+  </div>;
 }

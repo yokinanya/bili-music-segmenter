@@ -1,26 +1,8 @@
-import type { ItemState, JobState } from '@/lib/types';
-
-export const STATE_LABELS: Record<JobState | ItemState, string> = {
-  running: '处理中',
-  pending: '等待中',
-  succeeded: '已完成',
-  failed: '失败',
-  cancelled: '已停止',
+import type { StepState } from '@/lib/types';
+export const stateLabel: Record<StepState, string> = {
+  queued: '等待执行', running: '执行中', succeeded: '已完成', failed: '失败', cancelled: '已停止',
+  interrupted: '执行中断', cleanup_pending: '清理未完成', waiting: '等待资源', reused: '缓存复用', skipped: '已跳过', retrying: '重试中',
 };
-
-const TONE: Record<JobState | ItemState, string> = {
-  running: 'info',
-  pending: 'muted',
-  succeeded: 'ok',
-  failed: 'danger',
-  cancelled: 'warn',
-};
-
-export function StateBadge({ state }: { state: JobState | ItemState }) {
-  return (
-    <span className={`badge badge-${TONE[state]}`}>
-      {state === 'running' && <span className="dot" aria-hidden="true" />}
-      {STATE_LABELS[state] ?? state}
-    </span>
-  );
+export function StateBadge({ state }: { state: StepState }) {
+  return <span className={`badge state-${state}`}><span className="status-dot" />{stateLabel[state]}</span>;
 }

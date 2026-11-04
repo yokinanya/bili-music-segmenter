@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 from pathlib import Path
 
 from segment.logs import agent_log_path, configure_logging
@@ -18,10 +19,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--media", type=Path, required=True, help="输入视频或包含音轨的媒体文件")
     parser.add_argument("--outdir", type=Path, required=True, help="切片与 manifest 输出目录")
-    parser.add_argument("--netease-endpoint", default="http://127.0.0.1:3000/audio/match")
     parser.add_argument("--netease-cookie", default="")
     parser.add_argument("--chunk-seconds", type=int, default=600)
     parser.add_argument("--scan-concurrency", type=int, default=3, help="分块扫描并发数；1 为串行")
+    parser.add_argument("--candidate-concurrency", type=int, default=3)
+    parser.add_argument("--model-concurrency", type=int, default=3)
+    parser.add_argument("--recognizer-concurrency", type=int, default=3)
+    parser.add_argument("--upload-concurrency", type=int, default=2)
+    parser.add_argument("--media-concurrency", type=int, default=min(2, os.cpu_count() or 1))
     parser.add_argument("--chunk-context", type=int, default=30)
     parser.add_argument("--boundary-context", type=int, default=20)
     parser.add_argument("--minimum-candidate-seconds", type=float, default=30)
@@ -61,6 +66,11 @@ def main() -> None:
             args.outdir,
             chunk_seconds=args.chunk_seconds,
             scan_concurrency=args.scan_concurrency,
+            candidate_concurrency=args.candidate_concurrency,
+            model_concurrency=args.model_concurrency,
+            recognizer_concurrency=args.recognizer_concurrency,
+            upload_concurrency=args.upload_concurrency,
+            media_concurrency=args.media_concurrency,
             chunk_context_seconds=args.chunk_context,
             boundary_context_seconds=args.boundary_context,
             minimum_candidate_seconds=args.minimum_candidate_seconds,
@@ -71,7 +81,6 @@ def main() -> None:
             summary_model=args.summary_model,
             use_shazam=not args.skip_shazam,
             use_netease=not args.skip_netease,
-            netease_endpoint=args.netease_endpoint,
             netease_cookie=args.netease_cookie,
             recognizer_timeout=args.recognizer_timeout,
         )

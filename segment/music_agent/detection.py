@@ -4,18 +4,17 @@ from __future__ import annotations
 
 import logging
 import math
-import tempfile
-import uuid
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any
 
 from segment.music_agent.boundary_review import GROUPING_PROMPT, BoundaryOptions, review_boundaries
-from segment.music_agent.media import extract_wav, make_windows, media_duration
-from segment.music_agent.models import audio_model_call, call_with_storage
+from segment.music_agent.media import make_windows, media_duration
+from segment.music_agent.models import call_with_storage
 from segment.music_agent.prompts import BOUNDARY_PROMPT, SCAN_PROMPT
+from segment.music_agent.runtime import CURRENT
+from segment.music_agent.scan_workers import scan_windows
 from segment.music_agent.storage import AudioStorage
 
 LOGGER = logging.getLogger(__name__)
@@ -121,7 +120,6 @@ class ScanContext:
     storage: AudioStorage
     prefix: str
     model: str
-    run_id: str
 
 
 def scan_candidates(
@@ -137,72 +135,60 @@ def scan_candidates(
 ) -> tuple[list[Candidate], list[dict[str, Any]]]:
     if scan_concurrency <= 0:
         raise ValueError("扫描并发数必须为正整数")
-    windows = make_windows(media_duration(media), chunk_seconds, chunk_context)
-    context = ScanContext(media, client, storage, s3_prefix, model, uuid.uuid4().hex)
+    scope = CURRENT.get()
+    duration = scope.runtime.config["duration"] if scope else media_duration(media)
+    windows = make_windows(duration, chunk_seconds, chunk_context)
+    context = ScanContext(media, client, storage, s3_prefix, model)
     worker = partial(_scan_window, context)
-    results: dict[int, tuple[list[Candidate], dict]] = {}
-    with ThreadPoolExecutor(max_workers=scan_concurrency) as executor:
-        # Submit lazily: after a failure no further chunk is extracted, uploaded or sent to the model.
-        slots: list = []
-        submitted: dict[object, int] = {}
-        queued = iter(enumerate(windows, 1))
-        while len(slots) < scan_concurrency:
-            item = next(queued, None)
-            if item is None:
-                break
-            future = executor.submit(worker, item)
-            slots.append(future)
-            submitted[future] = item[0]
-        while slots:
-            done, _ = wait(slots, return_when=FIRST_COMPLETED)
-            for future in done:
-                slots.remove(future)
-                if future.exception() is not None:
-                    for other in slots:
-                        other.cancel()
-                    raise future.exception()
-                results[submitted[future]] = future.result()
-                item = next(queued, None)
-                if item is not None:
-                    future = executor.submit(worker, item)
-                    slots.append(future)
-                    submitted[future] = item[0]
-    ordered = [results[index] for index in sorted(results)]
+    ordered = scan_windows(windows, worker, scan_concurrency)
     candidates = [candidate for current, _ in ordered for candidate in current]
     metadata = [record for _, record in ordered]
     return _reindex(merge_candidates(candidates, max_gap=BORDER_DUPLICATE_SECONDS)), metadata
 
 
 def _scan_window(context: ScanContext, item: tuple) -> tuple[list[Candidate], dict]:
-    chunk_index, (core_start, core_end, audio_start, audio_end) = item
-    with tempfile.TemporaryDirectory(prefix="music-scan-") as directory:
-        wav = Path(directory) / "chunk.wav"
-        # Upload only the core range: the surrounding context of every chunk was already another chunk's core.
-        extract_wav(context.media, core_start, core_end, wav)
-        key = "/".join(filter(None, (context.prefix, context.run_id, f"scan-{chunk_index:04d}.wav")))
-        context.storage.upload(key, wav)
-        try:
-            audio_url = context.storage.signed_url(key)
-            response = audio_model_call(context.client, context.model, SCAN_PROMPT, audio_url)
-            found = parse_candidates(response["data"], core_start)
-            current = [candidate for candidate in found if candidate.start < core_end]
-            LOGGER.info(
-                "Scanned chunk %d: input %.0f-%.0fs, %d candidates",
-                chunk_index,
-                core_start,
-                core_end,
-                len(current),
-            )
-            record = {
-                "chunk": chunk_index,
-                "core_start": core_start,
-                "core_end": core_end,
-                "candidate_count": len(current),
-                "usage": response["usage"],
-            }
-            return current, record
-        finally:
-            context.storage.delete(key)
+    index, window = item
+    scope = CURRENT.get()
+    if scope:
+        spec = {"id": f"scan/{index}", "label": f"扫描分块 {index}", "input": [window, context.model, SCAN_PROMPT]}
+        result = scope.runtime.run(spec, lambda: _scan_chunk(context, item))
+        scope.runtime.advance("scan", "分块扫描", scope.runtime.config["scan_total"])
+    else:
+        result = _scan_chunk(context, item)
+    return [Candidate(**value) for value in result["candidates"]], result["metadata"]
+
+
+def _scan_chunk(context: ScanContext, item: tuple) -> dict:
+    index, (core_start, core_end, audio_start, audio_end) = item
+    response = call_with_storage(
+        context.media,
+        audio_start,
+        audio_end,
+        context.client,
+        context.storage,
+        model=context.model,
+        prompt=SCAN_PROMPT,
+        s3_prefix=context.prefix,
+    )
+    current = [
+        candidate
+        for candidate in parse_candidates(response["data"], audio_start)
+        if candidate.end > core_start and candidate.start < core_end
+    ]
+    if any(candidate.end > audio_end for candidate in current):
+        raise ValueError("扫描候选超出输入音频范围")
+    return {
+        "candidates": [asdict(candidate) for candidate in current],
+        "metadata": {
+            "chunk": index,
+            "core_start": core_start,
+            "core_end": core_end,
+            "audio_start": audio_start,
+            "audio_end": audio_end,
+            "candidate_count": len(current),
+            "usage": response["usage"],
+        },
+    }
 
 
 def refine_candidate(
@@ -217,7 +203,8 @@ def refine_candidate(
     minimum_confidence: float,
     review_instruction: str = "",
 ) -> tuple[list[tuple[float, float]], dict[str, Any]]:
-    duration = media_duration(media)
+    scope = CURRENT.get()
+    duration = scope.runtime.config["duration"] if scope else media_duration(media)
     options = BoundaryOptions(candidate.start, candidate.end, duration, context_seconds, minimum_confidence)
 
     def request(audio_start: float, audio_end: float) -> dict:

@@ -50,9 +50,11 @@ def make_windows(duration: float, chunk_seconds: int, context_seconds: int) -> l
 
 
 def extract_wav(media: Path, start: float, end: float, destination: Path) -> None:
+    from segment.music_agent.media_process import execute_media
+
     if start < 0 or end <= start:
         raise ValueError(f"invalid audio window {start}-{end}")
-    run_command(
+    execute_media(
         [
             "ffmpeg",
             "-hide_banner",
@@ -77,13 +79,16 @@ def extract_wav(media: Path, start: float, end: float, destination: Path) -> Non
             "-f",
             "wav",
             str(destination),
-        ]
+        ],
+        end - start,
     )
 
 
 def extract_recognition_audio(media: Path, start: float, end: float, destination: Path) -> None:
     """Extract the single audio form used by every recognizer pass, so results stay comparable."""
-    run_command(
+    from segment.music_agent.media_process import execute_media
+
+    execute_media(
         [
             "ffmpeg",
             "-hide_banner",
@@ -106,7 +111,8 @@ def extract_recognition_audio(media: Path, start: float, end: float, destination
             "-b:a",
             RECOGNITION_BITRATE,
             str(destination),
-        ]
+        ],
+        end - start,
     )
 
 

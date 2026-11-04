@@ -20,7 +20,6 @@ def test_all_logs_share_one_directory(project):
         logs.job_log_path("abc123"),
         logs.agent_log_path(Path("直播 回放.mp4")),
         logs.server_log_path(),
-        logs.inaseg_log_path(),
     ]
     for path in paths:
         assert path.parent == project / "logs"
@@ -31,7 +30,6 @@ def test_filenames_rotate_by_date(project):
     day = date(2026, 10, 21)
     assert logs.job_log_path("abc123", today=day).name == "webui-20261021-abc123.log"
     assert logs.server_log_path(today=day).name == "webui-server-20261021.log"
-    assert logs.inaseg_log_path(today=day).name == "inaseg-20261021.log"
     agent = logs.agent_log_path(Path("直播 回放.mp4"), started=datetime(2026, 10, 21, 23, 59, 59))
     assert agent.name == "music-agent-20261021-直播_回放.log"
     # A different day yields a different file instead of appending to the old one.

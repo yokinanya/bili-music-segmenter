@@ -1,15 +1,13 @@
 import json
-import sys
 from types import SimpleNamespace
 
 import pytest
 from event_capture import capture_events
-from test_webui import wait_for, wait_for_job
+from workspace_support import make_jobs, start, wait_for, wait_for_job
 
 from segment.music_agent.cli import build_parser
 from segment.music_agent.models import text_model_call
 from segment.usage import EVENT_PREFIX, UsageTotals
-from segment.webui_jobs import Jobs
 
 
 def event(model="qwen3.8-flash", usage=None):
@@ -61,19 +59,19 @@ def test_usage_recorded_even_if_model_json_invalid(monkeypatch, tmp_path):
     assert json.loads(line.removeprefix(EVENT_PREFIX))["usage"] == usage
 
 
-def test_subprocess_usage_only_in_memory(tmp_path):
+def test_subprocess_usage_persisted_and_separate_from_logs(tmp_path):
     data = event(usage={"prompt_tokens": 100, "completion_tokens": 20})
     line = (EVENT_PREFIX + json.dumps(data) + "\n").encode()
     code = f"import os; os.write(int(os.environ['MUSIC_AGENT_EVENTS_FD']), {line!r}); print('normal log')"
-    jobs = Jobs(lambda _: [sys.executable, "-c", code])
+    jobs = make_jobs(tmp_path, code)
     try:
-        job_id = jobs.start({"media": "video.mp4", "outdir": str(tmp_path)})
-        result = wait_for_job(jobs, job_id)
+        job_id = start(jobs)
+        wait_for_job(jobs, job_id)
         wait_for(lambda: jobs.status(job_id)["usage"]["input_tokens"] == 100, "用量事件未被收集")
-        result = jobs.status(job_id)
         assert jobs.usage.snapshot()["calls"] == 1
-        assert EVENT_PREFIX not in result["log"]
-        assert "normal log" in result["log"]
+        text = jobs.log_chunk(job_id, 0, 0)["text"]
+        assert EVENT_PREFIX not in text
+        assert "normal log" in text
     finally:
         jobs.close()
 

@@ -37,3 +37,5 @@ webui/tsconfig.tsbuildinfo
 *.sqlite3
 save.yaml
 .ipynb_checkpoints/
+
+/data/

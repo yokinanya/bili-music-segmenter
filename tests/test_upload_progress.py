@@ -1,15 +1,13 @@
 import json
-import sys
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import Mock
 
 import pytest
 from event_capture import capture_events
-from test_webui import wait_for, wait_for_job
+from workspace_support import make_jobs, start, wait_for, wait_for_job
 
 from segment.music_agent.storage import S3Storage
 from segment.upload_progress import UPLOAD_PREFIX, UploadReporter
-from segment.webui_jobs import Jobs
 
 
 @pytest.mark.parametrize("failure", [False, True])
@@ -42,6 +40,7 @@ def test_callbacks_are_thread_safe(monkeypatch, tmp_path):
     progress = UploadReporter("scan.wav", 100)
     with ThreadPoolExecutor() as pool:
         list(pool.map(progress, [1] * 100))
+    progress.state("completed")
     events = [json.loads(line.removeprefix(UPLOAD_PREFIX)) for line in capture.lines()]
     assert events[-1]["transferred_bytes"] == 100
 
@@ -50,12 +49,12 @@ def test_upload_progress_crosses_process_pipe(tmp_path):
     event = {"key": "scan.wav", "total_bytes": 100, "transferred_bytes": 40, "state": "failed"}
     line = (UPLOAD_PREFIX + json.dumps(event) + "\n").encode()
     code = f"import os; os.write(int(os.environ['MUSIC_AGENT_EVENTS_FD']), {line!r}); print('normal log')"
-    jobs = Jobs(lambda _: [sys.executable, "-c", code])
+    jobs = make_jobs(tmp_path, code)
     try:
-        job_id = jobs.start({"media": "scan.wav", "outdir": str(tmp_path)})
-        result = wait_for_job(jobs, job_id)
-        uploads = wait_for(lambda: jobs.status(job_id)["upload"]["uploads"])
+        job_id = start(jobs)
+        wait_for_job(jobs, job_id)
+        uploads = wait_for(lambda: jobs.status(job_id)["batch"][0].get("upload", {}).get("uploads"))
         assert uploads == [event]
-        assert UPLOAD_PREFIX not in result["log"]
+        assert UPLOAD_PREFIX not in jobs.log_chunk(job_id, 0, 0)["text"]
     finally:
         jobs.close()

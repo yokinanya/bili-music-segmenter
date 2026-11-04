@@ -29,7 +29,6 @@ def test_shazam_no_match_reaches_agent_status(monkeypatch):
     result = asyncio.run(
         recognition.recognize_audio(
             Path("audio.wav"),
-            netease_endpoint="http://localhost:3000",
             use_netease=False,
         )
     )
@@ -64,7 +63,6 @@ def test_recognizers_run_concurrently(monkeypatch):
     result = asyncio.run(
         recognition.recognize_audio(
             Path("audio.wav"),
-            netease_endpoint="http://localhost:3000",
             timeout=5,
         )
     )
@@ -76,19 +74,15 @@ def test_recognizers_run_concurrently(monkeypatch):
     assert result["netease"]["status"] == "no_match"
 
 
-def test_recognizer_base_exception_is_reported_not_raised(monkeypatch):
+def test_recognizer_failure_surfaces(monkeypatch):
     from segment.music_agent import recognition
-    from segment.shazam import KoreanCharException
 
-    async def korean(*args, **kwargs):
-        raise KoreanCharException("韩文歌名")
+    async def failure(*args, **kwargs):
+        raise ValueError("provider invalid response")
 
-    monkeypatch.setattr(recognition, "shazam_orig", korean)
-    result = asyncio.run(
-        recognition.recognize_audio(Path("audio.wav"), netease_endpoint="http://localhost:3000", use_netease=False)
-    )
-    assert result["shazam"]["status"] == "error"
-    assert "KoreanCharException" in result["shazam"]["error"]
+    monkeypatch.setattr(recognition, "shazam_orig", failure)
+    with pytest.raises(RuntimeError, match="provider invalid response"):
+        asyncio.run(recognition.recognize_audio(Path("audio.wav"), use_netease=False))
 
 
 def test_conflict_and_romanized_names_need_audio():

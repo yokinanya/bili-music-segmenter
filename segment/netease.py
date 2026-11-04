@@ -1,10 +1,9 @@
+import json
 import os
 import pprint
 import subprocess
 import tempfile
 from collections.abc import Iterable
-
-import requests
 
 from segment.shazam import legalize_filename
 
@@ -15,6 +14,7 @@ AFP_SAMPLE_RATE = 8000
 DEFAULT_REJECTS = (("劫", "黄霄雲"),)
 AFP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "vendor", "ncm-afp")
 AFP_GENERATOR = os.path.join(AFP_DIR, "generate_fp.js")
+MATCH_SCRIPT = os.path.join(AFP_DIR, "audio_match.js")
 
 
 def netease_title(match):
@@ -26,62 +26,15 @@ def netease_title(match):
 async def netease_orig(
     file,
     *,
-    endpoint,
     cookie="",
     offsets=AFP_OFFSETS,
     rejects=DEFAULT_REJECTS,
     timeout=DEFAULT_TIMEOUT,
 ):
-    match = _recognize_with_offsets(file, endpoint, cookie, offsets, timeout)
+    match = _recognize_with_offsets(file, cookie=cookie, offsets=offsets, timeout=timeout)
     title = netease_title(match)
     _raise_if_rejected(title, rejects)
     return title, match
-
-
-async def neteasing(
-    outdir,
-    media,
-    *,
-    endpoint,
-    cookie="",
-    offsets=AFP_OFFSETS,
-    rejects=DEFAULT_REJECTS,
-    coverart_path="",
-    timeout=DEFAULT_TIMEOUT,
-    ignore_fails=False,
-):
-    async def recognizer(file):
-        return await netease_orig(
-            file,
-            endpoint=endpoint,
-            cookie=cookie,
-            offsets=offsets,
-            rejects=rejects,
-            timeout=timeout,
-        )
-
-    from segment.shazam import recognize_files
-
-    await recognize_files(
-        outdir,
-        media,
-        recognizer_func=recognizer,
-        provider_name="netease",
-        coverart_path=coverart_path,
-        coverart_func=netease_coverart,
-        ignore_fails=ignore_fails,
-    )
-
-
-def netease_coverart(match, fn, outdir):
-    cover_url = _first_optional_text(match, ("cover_url", "coverUrl", "picUrl", "albumPic"))
-    if cover_url is None:
-        return
-    response = requests.get(cover_url, timeout=DEFAULT_TIMEOUT)
-    response.raise_for_status()
-    ext = os.path.splitext(cover_url.split("?", 1)[0])[1] or ".jpg"
-    with open(os.path.join(outdir, os.path.basename(fn) + ext), "wb") as file:
-        file.write(response.content)
 
 
 def generate_audio_fp(file, offset):
@@ -121,35 +74,38 @@ def _raise_if_rejected(title, rejects):
             raise NetEaseRejectedMatch(f"NetEase rejected known bad match: {title_text} by {artist_text}")
 
 
-def _recognize_with_offsets(file, endpoint, cookie, offsets, timeout):
+def _recognize_with_offsets(file, *, cookie, offsets, timeout):
     failures = []
     for offset in parse_offsets(offsets):
         try:
             audio_fp = generate_audio_fp(file, offset)
-            return _post_audio_match(endpoint, audio_fp, AFP_DURATION, cookie, timeout)
+            return _post_audio_match(audio_fp, duration=AFP_DURATION, cookie=cookie, timeout=timeout)
         except NetEaseNoMatch as error:
             failures.append(f"offset={offset}: {error}")
     raise NetEaseNoMatch("; ".join(failures))
 
 
-def _post_audio_match(endpoint, audio_fp, duration, cookie, timeout):
-    data = {"duration": duration, "audioFP": audio_fp}
-    if cookie:
-        data["cookie"] = cookie
-    response = requests.post(
-        endpoint,
-        params=data,
+def _post_audio_match(audio_fp, *, duration, cookie, timeout):
+    result = subprocess.run(
+        ["node", MATCH_SCRIPT],
+        input=json.dumps({"audioFP": audio_fp, "duration": duration, "cookie": cookie, "timeout": timeout}),
+        check=True,
+        text=True,
+        capture_output=True,
         timeout=timeout,
     )
-    response.raise_for_status()
-    payload = response.json()
-    return _extract_match(payload)
+    return _extract_match(json.loads(result.stdout))
 
 
 def _extract_pcm(file, pcm_path, offset):
-    subprocess.run(
+    from segment.music_agent.media_process import execute_media
+
+    execute_media(
         [
             "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
             "-y",
             "-ss",
             str(offset),
@@ -165,9 +121,7 @@ def _extract_pcm(file, pcm_path, offset):
             "f32le",
             pcm_path,
         ],
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        AFP_DURATION,
     )
 
 

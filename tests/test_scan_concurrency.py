@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from segment.music_agent import detection
+from segment.music_agent import detection, models, staged_audio
 from segment.upload_progress import UploadProgress
 
 WORKERS = 3
@@ -20,7 +20,7 @@ def test_scan_concurrency_limit_and_order(monkeypatch):
     peak = 0
     storage = Mock()
     monkeypatch.setattr(detection, "media_duration", lambda _: WINDOW_COUNT)
-    monkeypatch.setattr(detection, "extract_wav", lambda *args: None)
+    monkeypatch.setattr(staged_audio, "extract_wav", lambda *args: None)
 
     def call(*args):
         nonlocal active, peak
@@ -33,7 +33,7 @@ def test_scan_concurrency_limit_and_order(monkeypatch):
             active -= 1
         return {"data": {"segments": []}, "usage": None}
 
-    monkeypatch.setattr(detection, "audio_model_call", call)
+    monkeypatch.setattr(models, "audio_model_call", call)
     candidates, metadata = detection.scan_candidates(
         Path("input.mp4"),
         None,
@@ -47,15 +47,15 @@ def test_scan_concurrency_limit_and_order(monkeypatch):
     assert peak == WORKERS
     assert candidates == []
     assert [row["chunk"] for row in metadata] == list(range(1, WINDOW_COUNT + 1))
-    assert storage.delete.call_count == WINDOW_COUNT
+    storage.delete.assert_not_called()
 
 
 @pytest.mark.parametrize("workers", [1, WORKERS])
 def test_scan_failures_propagate_and_cleanup(monkeypatch, workers):
     storage = Mock()
     monkeypatch.setattr(detection, "media_duration", lambda _: WINDOW_COUNT)
-    monkeypatch.setattr(detection, "extract_wav", lambda *args: None)
-    monkeypatch.setattr(detection, "audio_model_call", Mock(side_effect=RuntimeError("API failure")))
+    monkeypatch.setattr(staged_audio, "extract_wav", lambda *args: None)
+    monkeypatch.setattr(models, "audio_model_call", Mock(side_effect=RuntimeError("API failure")))
     with pytest.raises(RuntimeError, match="API failure"):
         detection.scan_candidates(
             Path("input.mp4"),
@@ -67,13 +67,13 @@ def test_scan_failures_propagate_and_cleanup(monkeypatch, workers):
             model="test",
             scan_concurrency=workers,
         )
-    assert storage.upload.call_count == storage.delete.call_count
+    storage.delete.assert_not_called()
 
 
 def test_first_failure_stops_sending_further_chunks(monkeypatch):
     storage = Mock()
     monkeypatch.setattr(detection, "media_duration", lambda _: 40)
-    monkeypatch.setattr(detection, "extract_wav", lambda *args: None)
+    monkeypatch.setattr(staged_audio, "extract_wav", lambda *args: None)
     calls = []
     lock = Lock()
 
@@ -84,7 +84,7 @@ def test_first_failure_stops_sending_further_chunks(monkeypatch):
             raise RuntimeError("API failure")
         return {"data": {"segments": []}, "usage": None}
 
-    monkeypatch.setattr(detection, "audio_model_call", call)
+    monkeypatch.setattr(models, "audio_model_call", call)
     with pytest.raises(RuntimeError, match="API failure"):
         detection.scan_candidates(
             Path("input.mp4"),
@@ -98,7 +98,7 @@ def test_first_failure_stops_sending_further_chunks(monkeypatch):
         )
     # Serial execution must give up right after the failing chunk instead of scanning the rest.
     assert len(calls) == 1
-    assert storage.upload.call_count == storage.delete.call_count
+    storage.delete.assert_not_called()
 
 
 def test_border_candidates_are_merged_not_reviewed_twice():

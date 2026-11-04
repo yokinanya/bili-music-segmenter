@@ -6,18 +6,7 @@ dependencies = []
 
 [dependency-groups]
 recognizers = [
-    "regex>=2026.5.9",
-    "requests>=2.34.2",
     "shazamio<0.8",
-]
-local = [
-    "inaspeechsegmenter",
-    "numpy==1.26.3",
-    "pandas>=2.3.3",
-    "pyyaml>=6.0.3",
-    "scikit-image>=0.26.0",
-    "tensorflow>=2.18,<2.19",
-    { include-group = "recognizers" },
 ]
 api = [
     { include-group = "recognizers" },
@@ -25,9 +14,7 @@ api = [
     "opencc-python-reimplemented>=0.1.7",
     "boto3>=1.35",
     "python-dotenv>=1.0",
-]
-gpu = [
-    "tensorflow[and-cuda]>=2.18,<2.19; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "yt-dlp>=2026.10.26",
 ]
 dev = [
     "pytest>=8.0",
@@ -36,6 +23,3 @@ dev = [
 
 [tool.uv]
 default-groups = []
-
-[tool.uv.sources]
-inaspeechsegmenter = { git = "https://github.com/yokinanya/inaSpeechSegmenter.git" }

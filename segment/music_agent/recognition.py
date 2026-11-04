@@ -5,14 +5,14 @@ from __future__ import annotations
 import asyncio
 import re
 import unicodedata
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from opencc import OpenCC
 
-from segment.netease import netease_orig
-from segment.shazam import shazam_orig
+from segment.music_agent.runtime import CURRENT, fingerprint
+from segment.netease import NetEaseNoMatch, netease_orig
+from segment.shazam import parse_shazam_response, shazam_orig, shazam_title
 
 
 def _outcome(result: tuple[Any, Any] | None, error: BaseException | None) -> dict[str, Any]:
@@ -30,19 +30,52 @@ def _outcome(result: tuple[Any, Any] | None, error: BaseException | None) -> dic
 async def recognize_audio(
     audio: Path,
     *,
-    netease_endpoint: str,
     netease_cookie: str = "",
     timeout: int = 60,
     use_shazam: bool = True,
     use_netease: bool = True,
+    budget: asyncio.Semaphore | None = None,
 ) -> dict[str, Any]:
     """Query both recognizers concurrently, so one slow provider does not double the per-interval wait."""
-    runners: dict[str, Callable[[], dict[str, Any]]] = {}
+    runners = {}
     if use_shazam:
-        runners["shazam"] = lambda: _shazam_blocking(str(audio), timeout)
+        runners["shazam"] = _run_shazam
     if use_netease:
-        runners["netease"] = lambda: _netease_blocking(str(audio), netease_endpoint, netease_cookie, timeout)
-    results = await asyncio.gather(*(asyncio.to_thread(run) for run in runners.values()))
+        runners["netease"] = lambda: asyncio.to_thread(_netease_blocking, str(audio), netease_cookie, timeout)
+
+    async def invoke(provider, run):
+        scope = CURRENT.get()
+        identity = "recognition/" + fingerprint([str(audio), provider])
+
+        async def request():
+            async def call():
+                result = await run(str(audio), timeout) if provider == "shazam" else await run()
+                if result["status"] == "error":
+                    raise RuntimeError(result["error"])
+                return result
+
+            if budget is None:
+                return await call()
+            if scope:
+                scope.runtime.event(identity, f"{provider} 识曲", state="waiting")
+            async with budget:
+                if scope:
+                    scope.runtime.event(identity, f"{provider} 识曲", state="running")
+                return await call()
+
+        if scope:
+            return await scope.runtime.async_run(
+                {"id": identity, "label": f"{provider} 识曲", "input": [str(audio), provider, netease_cookie]},
+                request,
+            )
+        return await request()
+
+    results = await asyncio.gather(
+        *(invoke(provider, run) for provider, run in runners.items()), return_exceptions=True
+    )
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
     outcome = dict(zip(runners, results, strict=True))
     # A disabled provider stays explicitly disabled so the record never looks like a failed match.
     return {
@@ -51,21 +84,28 @@ async def recognize_audio(
     }
 
 
-def _shazam_blocking(audio: str, timeout: int) -> dict[str, Any]:
+async def _run_shazam(audio: str, timeout: int) -> dict:
     try:
-        return _outcome(asyncio.run(asyncio.wait_for(shazam_orig(audio), timeout=timeout)), None)
-    except BaseException as error:  # noqa: BLE001 - Korean titles and provider errors are both reported
+        scope = CURRENT.get()
+        if scope is None:
+            return _outcome(await asyncio.wait_for(shazam_orig(audio), timeout=timeout), None)
+        match = await asyncio.wait_for(scope.runtime.shazam_client.recognize(audio), timeout=timeout)
+        track = parse_shazam_response(match)
+        return _outcome((shazam_title(track), track) if track else None, None)
+    except Exception as error:
         return _outcome(None, error)
 
 
-def _netease_blocking(audio: str, endpoint: str, cookie: str, timeout: int) -> dict[str, Any]:
-    """``netease_orig`` is fully blocking (ffmpeg + node + requests), hence the worker thread."""
+def _netease_blocking(audio: str, cookie: str, timeout: int) -> dict[str, Any]:
+    """``netease_orig`` is fully blocking (FFmpeg + Node), hence the worker thread."""
     try:
         return _outcome(
-            asyncio.run(netease_orig(audio, endpoint=endpoint, cookie=cookie, rejects=(), timeout=timeout)),
+            asyncio.run(netease_orig(audio, cookie=cookie, rejects=(), timeout=timeout)),
             None,
         )
-    except BaseException as error:  # noqa: BLE001 - Korean titles and provider errors are both reported
+    except NetEaseNoMatch:
+        return {"status": "no_match"}
+    except Exception as error:
         return _outcome(None, error)
 
 

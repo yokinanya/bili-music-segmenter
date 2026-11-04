@@ -20,13 +20,32 @@ class AudioStorage(Protocol):
 
     def delete(self, key: str) -> None: ...
 
+    def exists(self, key: str) -> bool: ...
+
 
 @dataclass(frozen=True)
 class S3Storage:
     client: Any
     bucket: str
 
+    @property
+    def identity(self) -> dict:
+        return {"bucket": self.bucket, "endpoint": self.client.meta.endpoint_url}
+
+    def exists(self, key: str) -> bool:
+        from botocore.exceptions import ClientError
+
+        try:
+            self.client.head_object(Bucket=self.bucket, Key=key)
+        except ClientError as error:
+            if error.response["Error"]["Code"] in {"404", "NoSuchKey", "NotFound"}:
+                return False
+            raise
+        return True
+
     def upload(self, key: str, source: Path) -> None:
+        from boto3.s3.transfer import TransferConfig
+
         progress = UploadReporter(key, source.stat().st_size)
         progress.state("uploading")
         try:
@@ -36,6 +55,7 @@ class S3Storage:
                 key,
                 ExtraArgs={"ContentType": AUDIO_CONTENT_TYPE},
                 Callback=progress,
+                Config=TransferConfig(use_threads=False),
             )
         except Exception:
             progress.state("failed")

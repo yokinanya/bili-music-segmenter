@@ -1,82 +1,37 @@
-'use client';
-
-import type { BatchItem, Clip, JobState, JobStatus } from '@/lib/types';
-import { STATE_LABELS, StateBadge } from './StateBadge';
-import { ClipList } from './ClipList';
-
-interface Props {
-  status: JobStatus;
-  activeIndex: number;
-  clips: Clip[];
-  jobId: string;
-  onSelectItem: (index: number) => void;
+import type { BatchItem, JobStatus, ProgressStep } from '@/lib/types';
+import { isActive } from '@/lib/types';
+import { bytes, elapsed } from '@/lib/format';
+import { Button, ListButton, Progress } from './Material';
+import { StateBadge } from './StateBadge';
+import { Disclosure } from './Disclosure';
+export function BatchProgress({ job, selected, onSelect, onFollow, following }: { job: JobStatus; selected: number; onSelect: (value: number) => void; onFollow: () => void; following: boolean }) {
+  const done = job.batch.filter((item) => !isActive(item.state)).length;
+  return <section className="queue-panel"><div className="section-head"><h2>处理队列</h2><StateBadge state={job.state} /></div>
+    <div className="batch-summary"><strong>{done}<span className="muted"> / {job.batch.length}</span></strong><span className="muted">视频已处理 · {elapsed(job.started_at, job.finished_at)}</span></div>
+    <Progress label="整批视频完成数量" value={done / job.batch.length} />
+    <div className="count-row">{(['succeeded', 'failed', 'cancelled'] as const).map((state) => <span key={state}>{state === 'succeeded' ? '成功' : state === 'failed' ? '失败' : '停止'} {job.batch.filter((item) => item.state === state).length}</span>)}</div>
+    <ol className="list list-segmented queue-list">{job.batch.map((item, index) => <li key={item.id}>
+      <ListButton selected={index === selected} onClick={() => onSelect(index)}><span className="queue-number">{String(index + 1).padStart(2, '0')}</span><span className="list-item-content"><strong>{item.media}</strong><span className="list-item-supporting-text">{elapsed(item.started_at, item.finished_at)}</span></span><StateBadge state={item.state} /></ListButton>
+    </li>)}</ol>{!following && <Button variant="text" onClick={onFollow}>跟随当前视频</Button>}
+  </section>;
 }
-
-function progressPercent(status: JobStatus): number {
-  if (status.batch.length === 0) return 0;
-  const done = status.batch.filter((item) => item.state === 'succeeded').length;
-  return Math.round((done / status.batch.length) * 100);
+export function VideoProgress({ item }: { item: BatchItem }) {
+  const steps = item.steps.filter((step) => !step.parent_id);
+  const orphans = item.steps.filter((step) => step.parent_id && !item.steps.some((parent) => parent.id === step.parent_id));
+  return <section className="steps-panel"><div className="section-head"><h2>步骤进度</h2></div>
+    <p className="selected-name">{item.media}</p>{item.error && <div className="error" role="alert">{item.error}</div>}
+    {!steps.length && <div className="empty small-empty">等待视频开始处理</div>}
+    {[...steps, ...orphans].map((step) => <Step key={step.id} step={step} steps={item.steps} />)}
+    {item.upload?.uploads?.map((upload) => <div className="upload-step" key={upload.key}><span>S3 上传 · {upload.state}</span><Progress value={upload.transferred_bytes / upload.total_bytes} label="S3 上传字节进度" /><span className="muted">{bytes(upload.transferred_bytes)} / {bytes(upload.total_bytes)}</span></div>)}
+  </section>;
 }
-
-function itemDetail(item: BatchItem): string {
-  switch (item.state) {
-    case 'succeeded':
-      return `${item.clip_count} 个片段`;
-    case 'failed':
-      return item.returncode === null ? '失败' : `退出码 ${item.returncode}`;
-    case 'cancelled':
-      return '已停止';
-    default:
-      return '';
-  }
+function Step({ step, steps }: { step: ProgressStep; steps: ProgressStep[] }) {
+  const children = steps.filter((item) => item.parent_id === step.id);
+  const measured = step.total !== null && step.total > 0;
+  const counter = measured ? `${Number(step.completed.toFixed(1))} / ${Number(step.total!.toFixed(1))} ${step.unit ?? ''}` : '';
+  return <div className="step"><div className="step-head"><strong>{step.label}</strong><StateBadge state={step.state} /></div>
+    {measured && <><Progress value={step.completed / step.total!} label={`${step.label} ${counter}`} /><div className="step-meta">{counter}{step.elapsed_seconds !== undefined && <span>{step.elapsed_seconds.toFixed(1)}秒</span>}</div></>}
+    {step.message && <span className="muted">{step.message}</span>}{step.error && <p className="error-text">{step.error}</p>}
+    {children.length > 0 && <Disclosure title={`子步骤 · ${children.length}`} defaultOpen={['running', 'waiting', 'failed'].includes(step.state)}>{children.map((child) => <Step key={child.id} step={child} steps={steps} />)}</Disclosure>}
+  </div>;
 }
-
-export function BatchProgress({ status, activeIndex, clips, jobId, onSelectItem }: Props) {
-  const percent = progressPercent(status);
-  const finished = status.state !== 'running' && status.batch_complete;
-  return (
-    <section className="card" aria-labelledby="batch-title">
-      <div className="card-head">
-        <h2 id="batch-title">批处理进度</h2>
-        <div className="card-actions">
-          <StateBadge state={status.state as JobState} />
-        </div>
-      </div>
-      <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
-        <div className="progress-fill" style={{ width: `${percent}%` }} />
-      </div>
-      <p className="muted small">
-        {finished ? '已结束' : '处理中'} · 完成 {status.batch.filter((item) => item.state === 'succeeded').length} /{' '}
-        {status.batch.length} · {percent}%
-        {status.started_at && ` · 开始于 ${status.started_at.replace('T', ' ')}`}
-        {status.finished_at && ` · 结束于 ${status.finished_at.replace('T', ' ')}`}
-      </p>
-      <ul className="batch-list">
-        {status.batch.map((item, index) => (
-          <li key={`${item.media}-${index}`} className={index === activeIndex ? 'active' : undefined}>
-            <button type="button" className="batch-row" onClick={() => onSelectItem(index)}>
-              <span className="batch-index">{index + 1}</span>
-              <span className="file-name">{item.media}</span>
-              <span className="muted small">{itemDetail(item)}</span>
-              <StateBadge state={item.state} />
-            </button>
-          </li>
-        ))}
-      </ul>
-      <p className="muted small">点击某个文件可查看它的日志。</p>
-      {clips.length > 0 && <ClipList jobId={jobId} clips={clips} />}
-      {finished && status.state === 'failed' && (
-        <p className="notice danger" role="alert">
-          最后一个失败文件的退出码为 {status.returncode}。请查看日志中的错误详情。
-        </p>
-      )}
-      {status.accounting_errors.length > 0 && (
-        <p className="notice warn" role="alert">
-          统计不完整：{status.accounting_errors.join('；')}
-        </p>
-      )}
-    </section>
-  );
-}
-
-export const STATE_TEXT = STATE_LABELS;

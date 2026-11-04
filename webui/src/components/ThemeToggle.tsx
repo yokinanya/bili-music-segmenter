@@ -1,13 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { IconButton } from './Material';
+import { Icon } from './Icon';
 
 type Theme = 'system' | 'light' | 'dark';
 
 const STORAGE_KEY = 'bms-theme';
 const ORDER: Theme[] = ['system', 'light', 'dark'];
 const LABELS: Record<Theme, string> = { system: '跟随系统', light: '浅色', dark: '深色' };
-const ICONS: Record<Theme, string> = { system: '◐', light: '☀', dark: '☾' };
 
 function applyTheme(theme: Theme) {
   const dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -41,10 +42,5 @@ export function ThemeToggle() {
     });
   }, []);
 
-  return (
-    <button type="button" className="theme-toggle" onClick={cycle} title={`主题：${LABELS[theme]}（点击切换）`}>
-      <span aria-hidden="true">{ICONS[theme]}</span>
-      <span className="visually-hidden">当前主题 {LABELS[theme]}，点击切换</span>
-    </button>
-  );
+  return <IconButton variant="tonal" label={`主题：${LABELS[theme]}，点击切换`} onClick={cycle}><Icon name={theme} /></IconButton>;
 }

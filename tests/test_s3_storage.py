@@ -6,7 +6,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from botocore.stub import Stubber
 
-from segment.music_agent import detection, models
+from segment.music_agent import detection, models, staged_audio
 from segment.music_agent.config import ApiConfig, load_config
 from segment.music_agent.storage import SIGNED_URL_SECONDS, S3Storage, create_storage
 
@@ -134,13 +134,16 @@ def test_upload_arguments(tmp_path):
 def staging_case(monkeypatch, stage):
     storage = Mock()
     storage.signed_url.return_value = "https://example.com/audio"
-    monkeypatch.setattr(models, "extract_wav", lambda *args: None)
-    monkeypatch.setattr(detection, "extract_wav", lambda *args: None)
+    monkeypatch.setattr(staged_audio, "extract_wav", lambda *args: None)
     monkeypatch.setattr(detection, "media_duration", lambda _: 60)
     response = {"data": {"segments": []}, "usage": None}
-    model_call = Mock(return_value=response)
+
+    def call(*args):
+        args[-1]()
+        return response
+
+    model_call = Mock(side_effect=call)
     monkeypatch.setattr(models, "audio_model_call", model_call)
-    monkeypatch.setattr(detection, "audio_model_call", model_call)
 
     def invoke():
         if stage == "scan":
@@ -168,8 +171,8 @@ def staging_case(monkeypatch, stage):
 
 
 @pytest.mark.parametrize("stage", ["scan", "boundary"])
-@pytest.mark.parametrize("failure", [None, "upload", "signed_url", "model", "delete"])
-def test_staging_cleanup_and_errors(monkeypatch, stage, failure):
+@pytest.mark.parametrize("failure", [None, "upload", "signed_url", "model"])
+def test_staging_retains_objects_and_surfaces_errors(monkeypatch, stage, failure):
     case = staging_case(monkeypatch, stage)
     if failure:
         target = case.model_call if failure == "model" else getattr(case.storage, failure)
@@ -180,7 +183,4 @@ def test_staging_cleanup_and_errors(monkeypatch, stage, failure):
         case.invoke()
     key = case.storage.upload.call_args.args[0]
     assert key.startswith("music/")
-    if failure == "upload":
-        case.storage.delete.assert_not_called()
-    else:
-        case.storage.delete.assert_called_once_with(key)
+    case.storage.delete.assert_not_called()

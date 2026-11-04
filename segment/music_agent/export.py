@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from segment.music_agent.media import run_command
+from segment.music_agent.media_process import execute_media
 
 
 def safe_component(value: str, fallback: str) -> str:
@@ -24,7 +24,7 @@ def format_hms(seconds: float) -> str:
 def export_video(media: Path, start: float, end: float, destination: Path) -> None:
     if end <= start:
         raise ValueError(f"invalid clip range {start}-{end}")
-    run_command(
+    execute_media(
         [
             "ffmpeg",
             "-hide_banner",
@@ -54,7 +54,8 @@ def export_video(media: Path, start: float, end: float, destination: Path) -> No
             "-movflags",
             "+faststart",
             str(destination),
-        ]
+        ],
+        end - start,
     )
     if not destination.is_file() or destination.stat().st_size == 0:
         raise RuntimeError(f"导出视频为空：{destination}")

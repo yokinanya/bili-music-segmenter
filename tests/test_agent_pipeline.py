@@ -72,7 +72,7 @@ def test_background_skip_and_successful_export_pipeline(tmp_path, monkeypatch):
     ]
     monkeypatch.setattr(agent, "scan_candidates", lambda *args, **kwargs: (candidates, []))
     monkeypatch.setattr(agent, "refine_candidate", lambda *args, **kwargs: ([(110, 150)], {}))
-    monkeypatch.setattr(agent, "extract_recognition_audio", lambda *args: None)
+    monkeypatch.setattr(agent, "extract_recognition_audio", lambda *args: args[-1].write_bytes(b"audio"))
     calls = []
 
     async def recognize(*args, **kwargs):

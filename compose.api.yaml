@@ -1,52 +1,13 @@
 services:
   api:
-    build:
-      context: .
-      args:
-        DEPENDENCY_GROUP: api
+    build: .
     env_file:
       - .env
     environment:
-      MUSIC_AGENT_NETEASE_ENDPOINT: http://netease:3000/audio/match
-      WEBUI_OUTPUT_DIR: /output
+      WEBUI_DATA_DIR: /data/webui
     ports:
       - "127.0.0.1:7860:7860"
     volumes:
-      - ./input:/input:ro
-      - ./output:/output
+      - ./data/webui:/data/webui
       - ./logs:/logs
-    depends_on:
-      netease:
-        condition: service_healthy
-    command:
-      - uv
-      - run
-      - --frozen
-      - --group
-      - api
-      - -m
-      - segment.webui
-      - --host
-      - 0.0.0.0
-
-  netease:
-    image: node:24-alpine
-    environment:
-      HOST: 0.0.0.0
-      PORT: "3000"
-    command: ["npx", "--yes", "NeteaseCloudMusicApi@latest"]
-    volumes:
-      - netease-npm:/root/.npm
-    healthcheck:
-      test:
-        - CMD
-        - node
-        - -e
-        - "fetch('http://127.0.0.1:3000/audio/match').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-      interval: 5s
-      timeout: 5s
-      start_period: 60s
-      retries: 24
-
-volumes:
-  netease-npm:
+    command: ["uv", "run", "--frozen", "--group", "api", "-m", "segment.webui", "--host", "0.0.0.0"]

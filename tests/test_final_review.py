@@ -63,7 +63,7 @@ def test_invalid_summary_is_explicit_failure(requests):
     refine.assert_not_called()
 
 
-def test_failed_recheck_keeps_prepared_boundaries():
+def test_failed_recheck_stops_export():
     text = Mock(
         return_value={
             "data": {
@@ -74,9 +74,8 @@ def test_failed_recheck_keeps_prepared_boundaries():
         }
     )
     refine = Mock(side_effect=ValueError("边界复核在 8 次扩张后仍未找到歌曲边界"))
-    results, _ = audit_results([record()], context(), text_call=text, refine=refine)
-    assert results[0]["singing_intervals"] == [{"start_seconds": 110, "end_seconds": 180}]
-    assert "仍未找到歌曲边界" in results[0]["final_audio_review"]["error"]
+    with pytest.raises(ValueError, match="仍未找到歌曲边界"):
+        audit_results([record()], context(), text_call=text, refine=refine)
 
 
 def test_audio_failure_is_not_swallowed():

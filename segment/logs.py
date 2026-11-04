@@ -43,11 +43,6 @@ def server_log_path(*, today: date | None = None) -> Path:
     return _ensure(log_dir()) / f"webui-server-{_date(today)}.log"
 
 
-def inaseg_log_path(*, today: date | None = None) -> Path:
-    """Local detection log, one file per day."""
-    return _ensure(log_dir()) / f"inaseg-{_date(today)}.log"
-
-
 def configure_logging(level: int, *, log_file: Path | None = None) -> None:
     """Log to the console and, when a file is given, also write the same records to it."""
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")

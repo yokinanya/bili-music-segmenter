@@ -1,0 +1,13 @@
+:root { --motion-fast: 150ms; --motion-normal: 200ms; --ease-standard: cubic-bezier(.2, 0, 0, 1); }
+.nav-icon, .drop-zone { transition: background-color var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast); }
+.list-item { transition: background-color var(--motion-fast), color var(--motion-fast); }
+.btn { transition: transform var(--motion-fast) var(--ease-standard), border-radius var(--motion-normal) var(--ease-standard), var(--ripple-transition); }
+.btn:active { transform: scale(.98); transition-duration: 0ms; }
+.icon-btn { transition: var(--ripple-transition); }
+.disclosure-icon { transition: transform var(--motion-fast) var(--ease-standard); }
+@media (prefers-reduced-motion: reduce) {
+  .btn:active { transform: none; }
+  .btn { transition: background-color 150ms, color 150ms; }
+  .disclosure-icon { transition: none; }
+  .ripple { --ripple-animation: none; --ripple-scale: 100%; }
+}

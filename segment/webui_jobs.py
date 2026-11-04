@@ -1,492 +1,224 @@
-"""Validate WebUI requests and execute the existing CLI in child processes."""
+"""Persistent front-end operated workspace; execution survives browser disconnects."""
 
 from __future__ import annotations
 
-import codecs
 import json
-import os
-import subprocess
-import sys
-from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
-from datetime import datetime
+import shutil
 from pathlib import Path
-from threading import Lock, Thread
-from uuid import uuid4
+from threading import RLock
 
-from segment.events import EVENTS_ENV
-from segment.logs import job_log_path
-from segment.upload_progress import UPLOAD_PREFIX, UploadProgress
-from segment.usage import EVENT_PREFIX, UsageTotals
-from segment.webui_history import JobHistory
+from segment.music_agent.runtime import fingerprint
+from segment.workspace_downloads import register_download, validate_download
+from segment.workspace_options import default_options, validate_options
+from segment.workspace_records import ACTIVE_STATES, end_steps, new_job
+from segment.workspace_results import history_entry, make_archive, read_clips
+from segment.workspace_uploads import now
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-INPUT_DIR_NAME = "input"
-# Only these extensions are offered and accepted; anything else in input/ is ignored.
-MEDIA_SUFFIXES = (
-    ".mp4",
-    ".mkv",
-    ".flv",
-    ".ts",
-    ".mov",
-    ".m4v",
-    ".webm",
-    ".mp3",
-    ".m4a",
-    ".aac",
-    ".wav",
-    ".flac",
-    ".ogg",
-)
-DEFAULT_MAX_JOBS = 2
-READER_JOIN_SECONDS = 15
-EVENT_READ_SIZE = 65536
-LOG_READ_SIZE = 65536
-CONTAINER_INPUT_DIR = Path("/input")
-# Resolved on every call so tests can point the input directory elsewhere.
-input_root = PROJECT_ROOT
-
-
-class JobLimitReached(RuntimeError):
-    """Raised when too many jobs are still running or waiting to be collected."""
-
-
-def input_dir() -> Path:
-    """Fixed input directory; the WebUI only ever processes media placed here."""
-    if CONTAINER_INPUT_DIR.is_dir():
-        return CONTAINER_INPUT_DIR
-    return input_root / INPUT_DIR_NAME
-
-
-def list_inputs() -> list[dict]:
-    """Media files currently available in the input directory, sorted for a stable UI."""
-    directory = input_dir()
-    if not directory.is_dir():
-        return []
-    files = sorted(
-        (path for path in directory.iterdir() if path.is_file() and path.suffix.lower() in MEDIA_SUFFIXES),
-        key=lambda path: path.name.casefold(),
-    )
-    return [{"name": path.name, "size_bytes": path.stat().st_size} for path in files]
-
-
-def build_command(payload: dict) -> list[str]:
-    """Accept ``media`` (one name) or ``media`` (list of names), restricted to the input directory."""
-    if payload.keys() - {"media", "outdir"}:
-        raise ValueError("包含未知参数")
-    media = _input_path(payload, "media")
-    outdir = _absolute_path(payload, "outdir")
-    if outdir.exists() and not outdir.is_dir():
-        raise ValueError("输出路径必须是目录")
-    return [sys.executable, "-u", "-m", "segment.music_agent.cli", "--media", str(media), "--outdir", str(outdir)]
-
-
-def build_batch(payload: dict) -> list[list[str]]:
-    """Command per media file; the caller runs them one after another."""
-    names = payload.get("media")
-    items = names if isinstance(names, list) else [names]
-    if not items:
-        raise ValueError("请至少选择一个输入文件")
-    commands = []
-    for name in items:
-        commands.append(build_command({"media": name, "outdir": payload.get("outdir")}))
-    if len({command[command.index("--media") + 1] for command in commands}) != len(commands):
-        raise ValueError("输入文件重复")
-    return commands
-
-
-def _input_path(payload: dict, name: str) -> Path:
-    value = payload.get(name)
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{name} 不能为空")
-    candidate = Path(value.strip())
-    if candidate.name != value.strip() or candidate.is_absolute() or value.strip() in {".", ".."}:
-        # Only a bare file name is accepted, so a crafted value cannot escape the input directory.
-        raise ValueError("只能选择输入目录 input/ 中的文件名")
-    directory = input_dir().resolve()
-    media = (directory / candidate.name).resolve()
-    if media.parent != directory:
-        raise ValueError("只能选择输入目录 input/ 中的文件名")
-    if not media.is_file():
-        raise ValueError(f"输入目录中没有该文件：{candidate.name}")
-    if media.suffix.lower() not in MEDIA_SUFFIXES:
-        raise ValueError(f"不支持的媒体格式：{media.suffix}")
-    return media
-
-
-def _absolute_path(payload: dict, name: str) -> Path:
-    value = payload.get(name)
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{name} 不能为空")
-    path = Path(value.strip()).expanduser()
-    return (path if path.is_absolute() else PROJECT_ROOT / path).resolve()
-
-
-@dataclass
-class Item:
-    """One media file of a job; a single-file job simply has one item."""
-
-    media: str
-    log_path: Path
-    state: str = "pending"
-    returncode: int | None = None
-    usage: UsageTotals = field(default_factory=UsageTotals)
-    upload: UploadProgress = field(default_factory=UploadProgress)
-    errors: list[str] = field(default_factory=list)
-    log_errors: list[str] = field(default_factory=list)
-    log_parts: list[str] = field(default_factory=list)
-    process: subprocess.Popen | None = None
-    reader: Thread | None = None
-
-
-@dataclass
-class Job:
-    """A batch: its files run sequentially so one job never multiplies cloud concurrency."""
-
-    outdir: Path
-    items: list[Item]
-    usage: UsageTotals = field(default_factory=UsageTotals)
-    upload: UploadProgress = field(default_factory=UploadProgress)
-    errors: list[str] = field(default_factory=list)
-    stopped: bool = False
-    runner: Thread | None = None
-    started_at: str = ""
-    finished_at: str = ""
+LOG_READ_BYTES = 256 * 1024
 
 
 class Jobs:
-    def __init__(
-        self,
-        command_builder: Callable[[dict], list[str]],
-        *,
-        max_jobs: int = DEFAULT_MAX_JOBS,
-        usage: UsageTotals | None = None,
-        history: JobHistory | None = None,
-    ) -> None:
-        self._command_builder = command_builder
-        self.max_jobs = max_jobs
-        self.history = history or JobHistory()
-        self._max_jobs = max_jobs
-        self._jobs: dict[str, Job] = {}
-        self._lock = Lock()
-        # All jobs of one WebUI process report into the same totals unless a caller injects its own.
-        self.usage = usage if usage is not None else UsageTotals()
+    def __init__(self, store, uploads, services: dict):
+        self.store, self.uploads = store, uploads
+        self.root = services["root"]
+        self.execution = services["execution"]
+        self.cleanup = services["cleanup"]
+        self.usage = services["usage"]
+        self.defaults = default_options()
+        self._lock = RLock()
+        self._reconcile()
+        legacy = services.get("legacy_path")
+        if legacy and legacy.exists():
+            self._import_legacy(legacy)
+
+    def _reconcile(self) -> None:
+        for job in self.store.list("jobs"):
+            if job["state"] not in ACTIVE_STATES:
+                continue
+            items = [
+                end_steps({**item, "state": "interrupted"}, "interrupted") if item["state"] in ACTIVE_STATES else item
+                for item in job["batch"]
+            ]
+            self.store.put(
+                "jobs",
+                {
+                    **job,
+                    "state": "interrupted",
+                    "batch": items,
+                    "current_index": None,
+                    "error": "服务重启，执行已中断，请点击续跑",
+                },
+            )
+        for upload in self.store.list("uploads"):
+            if upload["state"] in {"uploading", "downloading"}:
+                self.store.put("uploads", {**upload, "state": "failed", "error": "上传中断，请重新选择文件上传"})
 
     def start(self, payload: dict) -> str:
-        """Run every file named by ``payload["media"]``; the builder returns one command per file."""
-        built = self._command_builder(payload)
-        if not built:
-            raise ValueError("命令构建器未返回任何命令")
-        # A builder may return one command or a list of commands; both describe the same batch size.
-        commands = built if isinstance(built[0], list) else [built]
-        labels = _media_names(payload)
-        if len(commands) != len(labels):
-            raise ValueError("命令数量与输入文件数量不一致")
-        outdir = _absolute_path(payload, "outdir")
         with self._lock:
-            running = sum(job.runner is not None and job.runner.is_alive() for job in self._jobs.values())
-            if running >= self._max_jobs:
-                raise JobLimitReached(f"同时最多运行 {self._max_jobs} 个任务，请等待当前任务结束")
-        outdir.mkdir(parents=True, exist_ok=True)
-        job_id = uuid4().hex
-        items = []
-        for label in labels:
-            log_path = job_log_path(f"{job_id}-{_safe_stem(Path(label).stem)}")
-            log_path.touch()
-            items.append(Item(label, log_path))
-        job = Job(outdir, items, started_at=datetime.now().isoformat(timespec="seconds"))
-        with self._lock:
-            self._jobs[job_id] = job
-        job.runner = Thread(target=self._run_batch, args=(job, commands), daemon=True)
-        job.runner.start()
-        return job_id
+            ids, options, request = self._validate(payload)
+            for job in self.store.list("jobs"):
+                if job.get("request_id") != request:
+                    continue
+                if job["upload_ids"] != ids or job["options"] != options:
+                    raise ValueError("同一请求 ID 对应的文件或参数不一致")
+                return job["id"]
+            uploads = [self._ready(identity) for identity in ids]
+            job = new_job(uploads, options, request, self.root)
+            self.store.put("jobs", job)
+            self.execution.schedule(job["id"])
+            return job["id"]
 
-    def status(self, job_id: str) -> dict:
+    def start_download(self, payload: dict) -> str:
+        url, cookie = validate_download(payload)
+        options = validate_options(payload.get("options", {}), self.defaults)
+        request = payload.get("request_id")
+        if not isinstance(request, str) or not request.strip():
+            raise ValueError("request_id 不能为空")
+        stamp = fingerprint([url, cookie, options])
         with self._lock:
-            job = self._jobs[job_id]
-        running = job.runner is not None and job.runner.is_alive()
-        # A file killed on purpose by the user is stopped, not failed.
-        failed = [] if job.stopped else [item for item in job.items if item.state == "failed"]
-        cancelled = job.stopped and any(item.state in {"failed", "cancelled"} for item in job.items)
-        settled = all(item.state not in {"pending", "running"} for item in job.items)
-        if running or not settled:
-            state = "running"
-        elif failed:
-            state = "failed"
-        elif cancelled:
-            state = "cancelled"
-        else:
-            state = "succeeded"
-        # The item list is only final once the runner thread has exited; report both.
+            for previous in self.store.list("jobs"):
+                if previous["request_id"] == request:
+                    if previous.get("remote_fingerprint") != stamp:
+                        raise ValueError("同一请求 ID 对应的下载参数不一致")
+                    return previous["id"]
+            upload = register_download(self.root, self.store, url=url, cookie=cookie)
+            job = {**new_job([upload], options, request, self.root), "remote_fingerprint": stamp}
+            self.store.put("jobs", job)
+            self.execution.schedule(job["id"])
+            return job["id"]
+
+    def _validate(self, payload: dict) -> tuple:
+        if payload.keys() - {"upload_ids", "options", "request_id"}:
+            raise ValueError("包含未知任务字段")
+        ids, request = payload.get("upload_ids"), payload.get("request_id")
+        if not isinstance(ids, list) or not ids or any(not isinstance(value, str) for value in ids):
+            raise ValueError("请选择已上传文件")
+        if len(set(ids)) != len(ids):
+            raise ValueError("任务中不能重复引用同一个文件 ID")
+        if not isinstance(request, str) or not request.strip():
+            raise ValueError("request_id 不能为空")
+        return ids, validate_options(payload.get("options", {}), self.defaults), request
+
+    def _ready(self, identity: str) -> dict:
+        item = self.store.get("uploads", identity)
+        path = self.uploads.path(identity)
+        if item["state"] != "ready" or not path.is_file():
+            raise ValueError(f"源文件未完成上传或已缺失：{item['name']}")
+        return {**item, "source_path": str(path)}
+
+    def status(self, identity: str) -> dict:
+        job = self.store.get("jobs", identity)
+        return {**job, "clips": [clip for item in job["batch"] for clip in read_clips(item)]}
+
+    def history(self) -> list[dict]:
+        current = [history_entry(self.status(job["id"])) for job in self.store.list("jobs")]
+        return sorted([*self.store.list("legacy"), *current], key=lambda item: item["started_at"], reverse=True)
+
+    def retry(self, identity: str) -> str:
         with self._lock:
-            batch = [_batch_item(job, item) for item in job.items]
-        if state != "running" and job.finished_at:
-            self.history.record(_history_entry(job_id, job, state, batch))
-        return {
-            "state": state,
-            "batch_complete": job.runner is not None and not job.runner.is_alive(),
-            "usage": job.usage.snapshot(),
-            "upload": job.upload.snapshot(),
-            "accounting_errors": list(job.errors),
-            "returncode": next((_item_returncode(item) for item in failed), 0),
-            "log": "".join("".join(item.log_parts) for item in job.items),
-            "log_complete": not running,
-            "log_path": str(job.items[-1].log_path) if job.items else "",
-            "outdir": str(job.outdir),
-            "clips": _exported_clips(job.outdir),
-            "started_at": job.started_at,
-            "finished_at": job.finished_at,
-            "media": job.items[0].media if len(job.items) == 1 else "",
-            "batch": batch,
-        }
-
-    def log_chunk(self, job_id: str, item_index: int, offset: int) -> dict:
-        """Return the log tail after ``offset`` for one batch item, plus the offset to send next."""
-        with self._lock:
-            job = self._jobs[job_id]
-            if not 0 <= item_index < len(job.items):
-                raise IndexError(item_index)
-            item = job.items[item_index]
-            text = "".join(item.log_parts)
-            running = item.state == "running"
-        return {"text": text[offset:], "offset": len(text), "running": running, "state": item.state}
-
-    def clip_path(self, job_id: str, name: str) -> Path | None:
-        """Resolve a clip of this job by file name, refusing anything outside its exported clips."""
-        with self._lock:
-            job = self._jobs[job_id]
-        for clip in _exported_clips(job.outdir):
-            if clip["name"] == name:
-                path = Path(clip["path"])
-                return path if path.is_file() else None
-        return None
-
-    def stop_current(self, job_id: str) -> None:
-        """Stop the file being processed and skip the rest of the batch; finished files keep their clips."""
-        with self._lock:
-            job = self._jobs[job_id]
-            job.stopped = True
-            current = next((item for item in job.items if item.state == "running"), None)
-        if current is not None and current.process is not None:
-            _stop(current.process)
-
-    def _run_batch(self, job: Job, commands: list[list[str]]) -> None:
-        for item, command in zip(job.items, commands, strict=True):
-            if job.stopped:
-                item.state = "cancelled"
-                continue
-            self._run_item(job, item, command)
-        job.finished_at = datetime.now().isoformat(timespec="seconds")
-
-    def _run_item(self, job: Job, item: Item, command: list[str]) -> None:
-        event_read, event_write = os.pipe()
-        try:
-            process = subprocess.Popen(
-                command,
-                cwd=PROJECT_ROOT,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                env=_child_environment(event_write),
-                pass_fds=(event_write,),
+            job = self.store.get("jobs", identity)
+            if job["state"] in ACTIVE_STATES or job["state"] in {"succeeded", "cleanup_pending"}:
+                raise ValueError("当前任务不能续跑")
+            for upload in job["upload_ids"]:
+                if self.store.get("uploads", upload).get("kind") != "download":
+                    self._ready(upload)
+            items = [
+                {**item, "last_sequence": 0, "state": "queued", "error": None, "steps": []}
+                if item["state"] != "succeeded"
+                else item
+                for item in job["batch"]
+            ]
+            self.store.put(
+                "jobs",
+                {
+                    **job,
+                    "batch": items,
+                    "attempt": job["attempt"] + 1,
+                    "state": "queued",
+                    "finished_at": None,
+                    "stop_requested": False,
+                    "error": None,
+                },
             )
-        finally:
-            os.close(event_write)
-        item.process = process
-        item.state = "running"
-        item.returncode = None
-        item.reader = Thread(target=self._collect, args=(job, item, event_read), daemon=True)
-        item.reader.start()
-        item.reader.join()
-        # poll() blocks until the exit status is collected, so this is the authoritative code.
-        returncode = process.poll()
-        if returncode is None:
-            returncode = process.wait()
-        item.returncode = returncode
-        if returncode == 0:
-            item.state = "succeeded"
-        elif job.stopped:
-            # The user asked to stop: this file was terminated, not broken.
-            item.state = "cancelled"
-        else:
-            item.state = "failed"
+            self.execution.schedule(identity)
+        return identity
+
+    def stop_current(self, identity: str) -> None:
+        if self.store.get("jobs", identity)["state"] not in ACTIVE_STATES:
+            raise ValueError("任务当前没有运行")
+        self.execution.stop(identity)
+
+    def log_chunk(self, identity: str, index: int, offset: int) -> dict:
+        item = self.store.get("jobs", identity)["batch"][index]
+        path = Path(item["log_path"])
+        if not path.exists() and item["state"] == "queued":
+            return {"text": "", "offset": 0, "complete": False}
+        with path.open("rb") as source:
+            source.seek(offset)
+            data = source.read(LOG_READ_BYTES)
+        # Leave an incomplete UTF-8 code point for the next read.
+        text = data.decode("utf-8", errors="strict") if not data else self._decode(data)
+        return {"text": text, "offset": offset + len(text.encode()), "complete": item["state"] not in ACTIVE_STATES}
+
+    @staticmethod
+    def _decode(data: bytes) -> str:
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError as error:
+            if error.reason != "unexpected end of data":
+                raise
+            return data[: error.start].decode("utf-8")
+
+    def clip_path(self, identity: str, clip_id: str) -> Path:
+        for clip in self.status(identity)["clips"]:
+            if clip["id"] == clip_id:
+                path = Path(clip["path"])
+                if path.is_file():
+                    return path
+        raise KeyError(clip_id)
+
+    def archive(self, identity: str) -> Path:
+        with self._lock:
+            return make_archive(self.status(identity), self.root / "jobs" / identity)
+
+    def delete(self, identity: str) -> None:
+        with self._lock:
+            job = self.store.get("jobs", identity)
+            if job["state"] in ACTIVE_STATES:
+                raise ValueError("请先停止任务再删除")
+            self.store.put("jobs", {**job, "state": "cleanup_pending", "cleanup_error": None})
+            try:
+                self.cleanup(identity)
+                directory = self.root / "jobs" / identity
+                if directory.exists():
+                    shutil.rmtree(directory)
+                self._remove_sources(job["upload_ids"], excluding=identity)
+                self.store.delete("jobs", identity)
+            except Exception as error:
+                self.store.put("jobs", {**job, "state": "cleanup_pending", "cleanup_error": str(error)})
+                raise
+
+    def _remove_sources(self, identities: list[str], *, excluding: str) -> None:
+        remaining = [job for job in self.store.list("jobs") if job["id"] != excluding]
+        for identity in identities:
+            if any(identity in job["upload_ids"] for job in remaining):
+                continue
+            if any(source["id"] == identity for source in self.store.list("uploads")):
+                self.uploads.remove(identity, excluding_job=excluding)
+
+    def _import_legacy(self, path: Path) -> None:
+        for entry in json.loads(path.read_text(encoding="utf-8")):
+            identity = entry["id"]
+            self.store.put(
+                "legacy",
+                {
+                    **entry,
+                    "id": identity,
+                    "legacy": True,
+                    "started_at": entry.get("started_at", entry.get("finished_at", now())),
+                    "availability": "仅有旧版摘要，详情与源文件不可续跑",
+                },
+            )
 
     def close(self) -> None:
-        with self._lock:
-            jobs = tuple(self._jobs.values())
-        for job in jobs:
-            job.stopped = True
-            for item in job.items:
-                if item.process is not None:
-                    _stop(item.process)
-            if job.runner is not None:
-                job.runner.join(timeout=READER_JOIN_SECONDS)
-            for item in job.items:
-                if item.reader is not None:
-                    item.reader.join(timeout=READER_JOIN_SECONDS)
-
-    def _collect(self, job: Job, item: Item, event_fd: int) -> None:
-        if item.process is None:
-            raise RuntimeError("任务进程未启动")
-        reporter = Thread(target=_read_events, args=(job, item, event_fd, self.usage), daemon=True)
-        reporter.start()
-        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-        try:
-            with item.log_path.open("wb") as log:
-                for chunk in _read_chunks(item.process.stdout):
-                    log.write(chunk)
-                    log.flush()
-                    text = decoder.decode(chunk)
-                    if text:
-                        item.log_parts.append(text)
-                text = decoder.decode(b"", final=True)
-                if text:
-                    item.log_parts.append(text)
-        except OSError as exc:
-            item.log_errors.append(f"日志写入失败：{exc}")
-            job.errors.append(f"{item.media}：{exc}")
-        finally:
-            item.process.stdout.close()
-            reporter.join()
-
-
-def _media_names(payload: dict) -> list[str]:
-    """Media names as declared by the request; a missing name still yields one item per command."""
-    names = payload.get("media")
-    values = names if isinstance(names, list) else [names]
-    names_out = [Path(str(value)).name for value in values if value]
-    return names_out or ["job"]
-
-
-def _history_entry(job_id: str, job: Job, state: str, batch: list[dict]) -> dict:
-    return {
-        "id": job_id,
-        "state": state,
-        "started_at": job.started_at,
-        "outdir": str(job.outdir),
-        "medias": [item["media"] for item in batch],
-        "clip_count": sum(item["clip_count"] for item in batch),
-        "usage": job.usage.snapshot(),
-    }
-
-
-def _batch_item(job: Job, item: Item) -> dict:
-    return {
-        "media": item.media,
-        "state": item.state,
-        "returncode": _item_returncode(item),
-        "log_path": str(item.log_path),
-        "clip_count": _clip_count(job.outdir, Path(item.media).stem),
-    }
-
-
-def _item_returncode(item: Item) -> int | None:
-    """Prefer the live process status; the worker thread stores the same value once it joins."""
-    if item.process is not None and item.process.poll() is not None:
-        return item.process.returncode
-    return item.returncode
-
-
-def _clip_count(outdir: Path, media_stem: str) -> int:
-    """Clips of one media file, attributed by that file's own manifest rather than by name."""
-    return len(_exported_clips(outdir, manifest_name=f"{media_stem}_music_agent.json"))
-
-
-def _safe_stem(value: str) -> str:
-    cleaned = "".join(char if char.isalnum() or char in "-_" else "_" for char in value)
-    return cleaned.strip("_") or "media"
-
-
-def _exported_clips(outdir: Path, manifest_name: str | None = None) -> list[dict]:
-    """Read already exported clips from the manifest the agent rewrites after every export."""
-    clips: list[dict] = []
-    pattern = manifest_name or "*_music_agent.json"
-    for manifest in sorted(outdir.glob(pattern)):
-        try:
-            data = json.loads(manifest.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        for record in data.get("candidates") or []:
-            for interval in record.get("singing_intervals") or []:
-                clip = _clip(interval)
-                if clip:
-                    clips.append(clip)
-    return clips
-
-
-def _clip(interval: dict) -> dict | None:
-    try:
-        path = Path(interval["file"])
-        duration = float(interval["end_seconds"]) - float(interval["start_seconds"])
-    except (KeyError, TypeError, ValueError):
-        return None
-    return {
-        "name": path.name,
-        "path": str(path),
-        "title": interval.get("title") or "",
-        "artist": interval.get("artist") or "",
-        "duration_seconds": round(duration, 1),
-    }
-
-
-def _read_chunks(stream, size: int = LOG_READ_SIZE) -> Iterator[bytes]:
-    """Read from the raw pipe in bounded chunks; incremental decoding keeps split characters intact."""
-    buffer = getattr(stream, "raw", stream)
-    while chunk := buffer.read(size):
-        yield chunk
-
-
-def _read_events(job: Job, item: Item, fd: int, service_usage: UsageTotals) -> None:
-    decoder = codecs.getincrementaldecoder("utf-8")()
-    buffered = ""
-
-    def consume(text: str) -> None:
-        nonlocal buffered
-        *lines, buffered = (buffered + text).split("\n")
-        for line in lines:
-            _handle_event(job, item, line, service_usage)
-
-    try:
-        with os.fdopen(fd, "rb", closefd=True) as pipe:
-            while chunk := pipe.read(EVENT_READ_SIZE):
-                consume(decoder.decode(chunk))
-        consume(decoder.decode(b"", final=True))
-        if buffered:
-            _handle_event(job, item, buffered, service_usage)
-    except OSError as exc:
-        item.errors.append(f"事件读取失败：{exc}")
-
-
-def _handle_event(job: Job, item: Item, line: str, service_usage: UsageTotals) -> None:
-    if line.startswith(UPLOAD_PREFIX):
-        try:
-            event = json.loads(line.removeprefix(UPLOAD_PREFIX))
-            item.upload.update(event)
-            job.upload.update(event)
-        except (ValueError, KeyError, TypeError) as exc:
-            item.errors.append(f"上传进度解析失败：{exc}")
-        return
-    if not line.startswith(EVENT_PREFIX):
-        return
-    try:
-        event = json.loads(line.removeprefix(EVENT_PREFIX))
-        item.usage.add(event)
-        job.usage.add(event)
-        service_usage.add(event)
-    except (ValueError, KeyError, TypeError) as exc:
-        item.errors.append(f"用量收集失败：{exc}")
-
-
-def _stop(process: subprocess.Popen) -> None:
-    if process.poll() is not None:
-        return
-    process.terminate()
-    try:
-        process.wait(timeout=15)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait()
-
-
-def _child_environment(event_fd: int) -> dict[str, str]:
-    return {**os.environ, "PYTHONIOENCODING": "utf-8", EVENTS_ENV: str(event_fd)}
+        self.execution.close()
