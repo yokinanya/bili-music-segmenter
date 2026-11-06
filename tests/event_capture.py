@@ -1,8 +1,9 @@
 """Test helpers for the child-process event pipe."""
 
+import json
 import os
 
-from segment.events import EVENTS_ENV
+from segment.events import EVENTS_ENV, emit_event
 
 
 class EventCapture:
@@ -24,3 +25,13 @@ def capture_events(monkeypatch, tmp_path) -> EventCapture:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
     monkeypatch.setenv(EVENTS_ENV, str(fd))
     return EventCapture(path)
+
+
+def send_raw(line: str) -> None:
+    """Write one already-serialized event line through the production writer."""
+    emit_event("", json.loads(line))
+
+
+def child_sends(line: str) -> str:
+    """Child program that sends one raw event line; requires PYTHONPATH to include tests/."""
+    return f"from event_capture import send_raw; send_raw({line!r})"

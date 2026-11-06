@@ -6,6 +6,7 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from segment.music_agent.boundary_response import InvalidBoundary, checked_boundary
 from segment.music_agent.runtime import checkpoint
 
 CONTEXT_GROWTH = 2
@@ -78,9 +79,15 @@ def _parse_intervals(data: dict, duration: float, confidence_threshold: float) -
         return []
     intervals = []
     for item in data.get("intervals", []):
-        start, end = float(item["start_seconds"]), float(item["end_seconds"])
+        try:
+            start, end = float(item["start_seconds"]), float(item["end_seconds"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise InvalidBoundary(f"模型演唱时间必须为秒数：interval={item!r}，输入时长={duration:.6f}秒") from error
         if not all(math.isfinite(x) for x in (start, end)) or not 0 <= start < end <= duration:
-            raise ValueError("模型演唱边界超出输入音频或时间无效")
+            raise InvalidBoundary(
+                f"模型演唱边界超出输入音频或时间无效：interval={item!r}，输入时长={duration:.6f}秒；"
+                f"要求 0 <= start_seconds < end_seconds <= {duration:.6f}"
+            )
         if intervals and start < intervals[-1][1]:
             raise ValueError("模型演唱区间必须按时间排序且不重叠")
         intervals.append((start, end))
@@ -104,6 +111,8 @@ def _group_intervals(intervals: list[tuple[float, float]], data: dict) -> list[t
 
 
 def _checked_response(request, start: float, end: float, threshold: float) -> list:
-    response = request(start, end)
-    intervals = _parse_intervals(response["data"], end - start, threshold)
-    return [response, intervals, _group_intervals(intervals, response["data"])]
+    def validate(response):
+        intervals = _parse_intervals(response["data"], end - start, threshold)
+        return [response, intervals, _group_intervals(intervals, response["data"])]
+
+    return checked_boundary(request, {"start": start, "end": end}, validate)

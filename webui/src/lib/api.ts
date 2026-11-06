@@ -18,6 +18,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 const post = <T>(path: string, data: unknown = {}) => request<T>(path, { method: 'POST', body: JSON.stringify(data) });
 export const api = {
+  editClip: (job: string, clip: string, data: import('./types').ClipEdit) => request<{ clip: import('./types').Clip }>(`/api/jobs/${job}/clip/${clip}`, { method: 'PUT', body: JSON.stringify(data) }),
+  manifest: (job: string, media: string) => request<unknown>(`/api/jobs/${job}/manifest/${media}`),
   bootstrap: () => request<Bootstrap>('/api/bootstrap'),
   uploads: () => request<{ files: SourceAsset[] }>('/api/uploads'),
   register: (file: File) => post<SourceAsset>('/api/uploads', { name: file.name, size_bytes: file.size }),

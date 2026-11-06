@@ -91,6 +91,7 @@ def _post_audio_match(audio_fp, *, duration, cookie, timeout):
         input=json.dumps({"audioFP": audio_fp, "duration": duration, "cookie": cookie, "timeout": timeout}),
         check=True,
         text=True,
+        encoding="utf-8",
         capture_output=True,
         timeout=timeout,
     )
@@ -130,6 +131,7 @@ def _run_afp_generator(pcm_path):
         ["node", AFP_GENERATOR, pcm_path],
         check=True,
         text=True,
+        encoding="utf-8",
         capture_output=True,
     )
     output = result.stdout.strip().splitlines()

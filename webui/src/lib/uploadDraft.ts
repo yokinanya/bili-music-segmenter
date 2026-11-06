@@ -9,7 +9,11 @@ interface UploadContext {
 }
 export async function uploadDraft(file: DraftFile, context: UploadContext): Promise<SourceAsset> {
   if (file.state === 'ready' && file.source) return file.source;
-  if (!file.file) throw new Error(`请重新选择“${file.name}”以重试上传`);
+  if (!file.file) {
+    const error = `请重新选择“${file.name}”以重试上传`;
+    context.update({ state: 'failed', error });
+    throw new Error(error);
+  }
   context.update({ state: 'uploading', error: undefined });
   try {
     const source = file.source ?? await context.register(file.file);

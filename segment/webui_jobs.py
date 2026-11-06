@@ -7,10 +7,13 @@ import shutil
 from pathlib import Path
 from threading import RLock
 
+from segment.music_agent.export import export_video
+from segment.music_agent.media import media_duration
 from segment.music_agent.runtime import fingerprint
 from segment.workspace_downloads import register_download, validate_download
 from segment.workspace_options import default_options, validate_options
 from segment.workspace_records import ACTIVE_STATES, end_steps, new_job
+from segment.workspace_result_edit import edit_result, manifest_path
 from segment.workspace_results import history_entry, make_archive, read_clips
 from segment.workspace_uploads import now
 
@@ -25,6 +28,12 @@ class Jobs:
         self.cleanup = services["cleanup"]
         self.usage = services["usage"]
         self.defaults = default_options()
+        self.result_services = {
+            "export": services.get("export", export_video),
+            "duration": services.get("duration", media_duration),
+            "source_root": self.root / "uploads",
+            "save": lambda job: self.store.put("jobs", job),
+        }
         self._lock = RLock()
         self._reconcile()
         legacy = services.get("legacy_path")
@@ -101,14 +110,42 @@ class Jobs:
 
     def _ready(self, identity: str) -> dict:
         item = self.store.get("uploads", identity)
-        path = self.uploads.path(identity)
+        path = self._source_path(item)
         if item["state"] != "ready" or not path.is_file():
             raise ValueError(f"源文件未完成上传或已缺失：{item['name']}")
-        return {**item, "source_path": str(path)}
+        return {**{key: value for key, value in item.items() if key != "download_config"}, "source_path": str(path)}
+
+    def _source_path(self, upload: dict) -> Path:
+        if upload.get("kind") == "download":
+            return self.root / "uploads" / upload["id"] / "source.mkv"
+        return self.uploads.path(upload["id"])
+
+    def _public_item(self, item: dict) -> dict:
+        upload = self.store.get("uploads", item["upload_id"])
+        return {
+            **{key: value for key, value in item.items() if key != "download_config"},
+            "source_type": upload.get("kind", "upload"),
+            "source_url": upload.get("remote_url"),
+            "can_reuse": upload["state"] == "ready" and self._source_path(upload).is_file(),
+        }
 
     def status(self, identity: str) -> dict:
         job = self.store.get("jobs", identity)
-        return {**job, "clips": [clip for item in job["batch"] for clip in read_clips(item)]}
+        return {
+            **job,
+            "batch": [self._public_item(item) for item in job["batch"]],
+            "clips": [clip for item in job["batch"] for clip in read_clips(item)],
+        }
+
+    def manifest(self, identity: str, media_id: str) -> Path:
+        with self._lock:
+            return manifest_path(self.store.get("jobs", identity), media_id)
+
+    def edit_clip(self, identity: str, clip_id: str, payload: dict) -> dict:
+        with self._lock:
+            return edit_result(
+                self.store.get("jobs", identity), {"clip_id": clip_id, "payload": payload}, self.result_services
+            )
 
     def history(self) -> list[dict]:
         current = [history_entry(self.status(job["id"])) for job in self.store.list("jobs")]

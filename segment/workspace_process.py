@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from threading import Thread
 
-from segment.events import EVENTS_ENV
+from segment.event_pipe import EVENTS_ENV, HANDLE_ENV, open_event_pipe
 from segment.music_agent.runtime import PROGRESS_PREFIX
 from segment.upload_progress import UPLOAD_PREFIX
 from segment.usage import EVENT_PREFIX
@@ -52,16 +52,17 @@ def command_for(item: dict) -> list[str]:
     ]
 
 
-def child_environment(job: dict, item: dict, *, event_fd: int, state_dir: Path) -> dict:
+def child_environment(job: dict, item: dict, *, event_fd: int, state_dir: Path, onto_handle: bool = False) -> dict:
     options = {}
     for name, value in job["options"].items():
         if name.startswith("use_"):
             value = not value
         options["MUSIC_AGENT_" + ENV_OPTION_NAMES.get(name, name.upper())] = str(value).lower()
+    events = {HANDLE_ENV: str(event_fd)} if onto_handle else {EVENTS_ENV: str(event_fd)}
     return {
         **os.environ,
         **options,
-        EVENTS_ENV: str(event_fd),
+        **events,
         "PYTHONIOENCODING": "utf-8",
         "MUSIC_AGENT_STATE_DIR": str(state_dir),
         "MUSIC_AGENT_JOB_ID": job["id"],
@@ -70,12 +71,19 @@ def child_environment(job: dict, item: dict, *, event_fd: int, state_dir: Path) 
     }
 
 
+def _launch_options(pipe) -> dict:
+    """Inherit only the event pipe; Windows cannot pass descriptors and uses the shared handle."""
+    if os.name == "nt":
+        return {"close_fds": False, "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True, "pass_fds": (pipe.write_end,)}
+
+
 class ProcessRunner:
     def __init__(self, command=command_for):
         self.command = command
 
     def run(self, job: dict, item: dict, *, state_dir: Path, report, started) -> int:
-        read_fd, write_fd = os.pipe()
+        pipe = open_event_pipe()
         try:
             process = subprocess.Popen(
                 self.command(item),
@@ -83,18 +91,19 @@ class ProcessRunner:
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                start_new_session=True,
-                env=child_environment(job, item, event_fd=write_fd, state_dir=state_dir),
-                pass_fds=(write_fd,),
+                **_launch_options(pipe),
+                env=child_environment(
+                    job, item, event_fd=pipe.child_value, state_dir=state_dir, onto_handle=pipe.inheritable
+                ),
             )
         except Exception:
-            os.close(read_fd)
+            os.close(pipe.read_end)
             raise
         finally:
-            os.close(write_fd)
+            os.close(pipe.write_end)
         started(process)
         event_errors = []
-        reader = Thread(target=_collect_events, args=(read_fd, report, event_errors))
+        reader = Thread(target=_collect_events, args=(pipe.read_end, report, event_errors))
         reader.start()
         try:
             with Path(item["log_path"]).open("ab") as log:
@@ -122,7 +131,7 @@ def _collect_events(fd: int, report, errors: list) -> None:
         DOWNLOAD_PREFIX: "download",
     }
     try:
-        with os.fdopen(fd, encoding="utf-8") as pipe:
+        with os.fdopen(fd, encoding="utf-8", errors="replace") as pipe:
             for line in pipe:
                 for prefix, kind in prefixes.items():
                     if line.startswith(prefix):
@@ -134,6 +143,10 @@ def _collect_events(fd: int, report, errors: list) -> None:
 
 def stop_process(process: subprocess.Popen) -> None:
     if process.poll() is not None:
+        return
+    if os.name == "nt":
+        process.kill()
+        process.wait()
         return
     os.killpg(process.pid, signal.SIGTERM)
     try:

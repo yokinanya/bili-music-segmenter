@@ -30,7 +30,7 @@ class WorkspaceHTTP(BaseHTTPRequestHandler):
         if not route.startswith("/api/"):
             return True
         supplied = self.headers.get("X-WebUI-Token", "")
-        if route.endswith("/archive") or "/clip/" in route:
+        if route.endswith("/archive") or "/clip/" in route or "/manifest/" in route:
             supplied = supplied or self._query("token")
         if secrets.compare_digest(supplied, self.token):
             return True

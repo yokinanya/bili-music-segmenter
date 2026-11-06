@@ -10,4 +10,4 @@ services:
     volumes:
       - ./data/webui:/data/webui
       - ./logs:/logs
-    command: ["uv", "run", "--frozen", "--group", "api", "-m", "segment.webui", "--host", "0.0.0.0"]
+    command: ["uv", "run", "--frozen", "-m", "segment.webui", "--host", "0.0.0.0"]

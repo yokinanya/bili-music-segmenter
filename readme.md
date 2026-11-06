@@ -9,8 +9,8 @@
 ```bash
 cp .env.example .env
 # 填写 API 与 S3 配置
-uv sync --group api
-uv run --group api -m segment.webui
+uv sync
+uv run -m segment.webui
 ```
 
 使用控制台打印的带令牌地址打开页面。服务默认仅监听 `127.0.0.1:7860`；可用 `--port` 修改端口。令牌每次启动更换，服务重启后请使用新地址。浏览器保存令牌并从地址栏移除；普通 API 必须通过请求头认证，试听和下载链接支持 URL 令牌。
@@ -28,6 +28,8 @@ S3_REGION=
 ```
 
 `DASHSCOPE_BASE_URL` 是与 API key 对应的 HTTPS 接入地址。音频模型默认 `qwen3.8-omni-flash`，文本与全场审核默认 `qwen3.8-flash`。S3 支持 AWS S3、MinIO、R2 等兼容存储；Endpoint 必须能被云端模型访问。Bucket 保持私有，授予指定前缀的上传、读取、HEAD 与删除权限。可配置 `S3_PREFIX`、`S3_ADDRESSING_STYLE`、`S3_USER_AGENT`，详见 `.env.example`。
+
+S3 上传保留 SigV4 签名与分片上传，仅在 API 要求时计算请求校验和，避免 SDK 自动添加部分兼容存储不支持的 `aws-chunked` / `STREAMING-UNSIGNED-PAYLOAD-TRAILER` 编码。上传失败直接报错，不自动切换上传方式。
 
 ## 工具操作中心
 
@@ -49,13 +51,24 @@ S3_REGION=
 
 服务运行不依赖页面保持打开。服务重启后未完成任务标记为“执行中断”，点击续跑恢复。旧版 `logs/webui-history.json` 导入为仅摘要的历史记录，会明确提示缺失详情与源文件。
 
+## 任务复核与操作
+
+- 历史支持按文件名或任务 ID 搜索、按状态筛选。页面、任务、面板和筛选条件写入 URL，支持刷新恢复与浏览器前进/后退。
+- 任务详情可查看来源、执行次数、时间和处理参数。链接任务区分“复用视频重新分析”与“重新下载原链接”；缺失源文件时禁止复用。
+- 中断上传可在原条目重新选择同名、同大小文件后重传；不会冒充断点续传。并发参数统一放在高级设置，非法输入在字段旁显示并阻止提交。
+- 结果显示原视频时间范围、文件名及识曲依据，支持查看和下载分析 JSON。任务结束后可以编辑标题、歌手、起止秒数并通过 FFmpeg 重新导出；不调用模型，导出失败保留原结果。编辑后的 JSON 和片段持久保存，整批 ZIP 使用最新结果。
+- 日志支持全历史关键词定位、复制、下载与分页浏览；分页仅限制渲染范围，不丢弃历史。用量展示当前执行记录，模型明细可切换任务和本次服务口径。
+- 默认收起已完成子步骤和上传记录，保留当前工作与失败详情；手机提交按钮与桌面使用一致的底部操作区。
+
 ## 进度、重试与缓存
 
 进度由独立事件管道传输：批次按视频计数，扫描按分块计数，候选按工作单元计数，FFmpeg 按已处理媒体时长计数，浏览器和 S3 上传分别按真实字节计数。未知总量的请求展示状态与耗时，不以固定阶段权重估算时间百分比。并行步骤可同时运行，等待资源、缓存复用、跳过、失败和停止分别展示。
 
-“续跑”保持任务与参数，复用该任务通过校验的成功检查点，仅执行未完成步骤和依赖改变的后续工作。“重新处理”创建新任务，允许调整参数，重新生成模型分析，同时复用匹配的媒体缓存。语义校验失败的模型响应不会提交为成功检查点。
+“续跑”保持任务与参数，复用该任务通过校验的成功检查点，仅执行未完成步骤和依赖改变的后续工作。检查点统一以 UTF-8 写入和读取，Windows 续跑不依赖系统代码页。“重新处理”创建新任务，允许调整参数，重新生成模型分析，同时复用匹配的媒体缓存。语义校验失败的模型响应不会提交为成功检查点。
 
 同一音频窗口按源文件摘要、精确区间、编码参数及提取版本定位。模型请求前验证 S3 对象并重新签名；已删除的对象明确记录缓存未命中并重新提取上传，权限或网络错误直接失败。成功和失败任务均保留缓存，手动删除任务时仅删除不再被其他任务引用的对象。删除失败保留“清理未完成”和错误，可再次清理。
+
+边界复核明确告知模型输入音频时长和相对秒数范围。无效、倒置或越界的时间不自动裁剪、不猜测绝对时间；将具体校验错误及上次响应反馈给模型，重新听取同一音频，默认最多额外纠正 2 次，可设 `MUSIC_AGENT_BOUNDARY_RETRIES=0` 禁用。每次实际请求正常记账，失败响应写入日志，成功纠正记录保留在边界审核结果；纠正耗尽仍明确失败，网络/API 错误不按边界错误重试。
 
 边界复核以完整演唱为目标，保留有证据的前奏、尾奏、间奏、换气与短暂插话。触及输入边界时按证据扩张上下文；全场审核只请求需要的追加音频复核，最终确认后才导出。复核失败会停止依赖步骤并保留已确认结果，不悄悄使用旧边界继续导出。模型判断仍可能不准确，JSON 记录保留分析依据。
 
@@ -80,7 +93,7 @@ S3_REGION=
 
 `vendor/ncm-afp/audio_match.js` 从 NeteaseCloudMusicApi 4.32.0 的音频匹配路由提取，使用 Node 自带 fetch 直接请求网易云上游，不依赖 axios、Web 服务器或整包 npm 安装。来源和 MIT 许可见同目录 README 与 LICENSE。
 
-Python 提取 8 kHz Float32 PCM，打包的指纹工具生成 audioFP，再通过标准输入向匹配工具传递指纹、超时和 Cookie。无匹配、异常响应、HTTP 错误和超时分别明确处理。可通过服务端 `MUSIC_AGENT_NETEASE_COOKIE` 配置网易云 Cookie，与下载视频的 Cookie 独立。
+Python 提取 8 kHz Float32 PCM，打包的指纹工具生成 audioFP，再通过标准输入向匹配工具传递指纹、超时和 Cookie。Node 子进程的标准输入和输出明确使用 UTF-8，不依赖 Windows 系统代码页。无匹配、异常响应、HTTP 错误和超时分别明确处理。可通过服务端 `MUSIC_AGENT_NETEASE_COOKIE` 配置网易云 Cookie，与下载视频的 Cookie 独立。
 
 ## 界面与构建
 
@@ -101,8 +114,8 @@ Python 直接托管静态产物，运行时不需要 Next.js 服务。发布产�
 ## 命令行与 Docker
 
 ```bash
-uv run --group api -m segment.music_agent.cli --media video.mp4 --outdir output
-uv run --group api -m segment.music_agent.cli --help
+uv run -m segment.music_agent.cli --media video.mp4 --outdir output
+uv run -m segment.music_agent.cli --help
 
 docker compose -f compose.api.yaml up --build -d
 docker compose -f compose.api.yaml logs api
@@ -113,10 +126,10 @@ Compose 仅启动一个应用容器，挂载 `data/webui/` 和 `logs/`，不需�
 ## 开发验证
 
 ```bash
-uv sync --group api --group dev
+uv sync --group dev
 ruff check .
 ruff format --check .
-timeout 60s uv run --group api --group dev -m pytest -q
+timeout 60s uv run --group dev -m pytest -q
 npm --prefix webui run typecheck
 npm --prefix webui run release
 ```

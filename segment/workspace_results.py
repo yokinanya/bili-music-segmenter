@@ -10,26 +10,45 @@ from pathlib import Path
 
 def read_clips(item: dict) -> list[dict]:
     clips = []
-    for manifest in Path(item["outdir"]).glob("*_music_agent.json"):
+    for manifest in manifest_paths(item):
         data = json.loads(manifest.read_text(encoding="utf-8"))
         for record in data["candidates"]:
             for interval in record.get("singing_intervals", []):
                 if "file" in interval:
-                    clips.append(_clip(item, interval))
+                    clips.append(_clip(item, interval, data))
     return clips
 
 
-def _clip(item: dict, interval: dict) -> dict:
-    path = Path(interval["file"]).resolve()
-    if not path.is_relative_to(Path(item["outdir"]).resolve()):
+def manifest_paths(item: dict) -> list[Path]:
+    return [
+        contained_path(path, Path(item["outdir"])) for path in sorted(Path(item["outdir"]).glob("*_music_agent.json"))
+    ]
+
+
+def contained_path(path: Path, root: Path) -> Path:
+    resolved = path.resolve()
+    if not resolved.is_relative_to(root.resolve()):
         raise ValueError("结果文件超出任务目录")
+    return resolved
+
+
+def _clip(item: dict, interval: dict, manifest: dict) -> dict:
+    path = contained_path(Path(interval["file"]), Path(item["outdir"]))
     return {
-        "id": hashlib.sha256(str(path).encode()).hexdigest(),
+        "id": interval.get("clip_id", hashlib.sha256(str(path).encode()).hexdigest()),
         "media_id": item["id"],
         "name": path.name,
         "path": str(path),
         "title": interval.get("title", ""),
         "artist": interval.get("artist", ""),
+        "source_name": item["media"],
+        "start_seconds": interval["start_seconds"],
+        "end_seconds": interval["end_seconds"],
+        "original_start_seconds": interval.get("original_start_seconds", interval["start_seconds"]),
+        "original_end_seconds": interval.get("original_end_seconds", interval["end_seconds"]),
+        "source_duration_seconds": manifest.get("duration_seconds"),
+        "recognition": interval.get("recognition", {}),
+        "title_resolution": interval.get("title_resolution", {}),
         "duration_seconds": round(interval["end_seconds"] - interval["start_seconds"], 3),
     }
 
@@ -64,7 +83,7 @@ def make_archive(job: dict, root: Path) -> Path:
 
 def _archive_item(archive, item: dict) -> None:
     prefix = item["id"] + "/"
-    for manifest in Path(item["outdir"]).glob("*_music_agent.json"):
+    for manifest in manifest_paths(item):
         archive.write(manifest, prefix + manifest.name)
     for clip in read_clips(item):
         archive.write(clip["path"], prefix + clip["id"][:12] + "_" + clip["name"])

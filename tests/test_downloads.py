@@ -24,7 +24,9 @@ def test_download_registration_idempotency_and_cookie_storage(tmp_path):
         assert jobs.start_download(payload) == first
         job = wait_for_job(jobs, first)
         assert "test-cookie" not in json.dumps(job)
-        config = Path(job["batch"][0]["download_config"])
+        assert "download_config" not in job["batch"][0]
+        internal_job = jobs.store.get("jobs", first)
+        config = Path(internal_job["batch"][0]["download_config"])
         assert config.stat().st_mode & 0o777 == 0o600
         assert json.loads(config.read_text())["cookie"] == payload["cookie"]
         jobs.delete(first)

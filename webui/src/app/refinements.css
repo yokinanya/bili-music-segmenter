@@ -1,0 +1,27 @@
+.download-form-slot, form.download-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+form.download-panel > .input-scroll { flex: 1; }
+form.download-panel > .pane-footer > .btn { width: 100%; }
+.task-details { margin-block: 16px; }
+.task-details dl, .detail-grid { display: grid; grid-template-columns: minmax(90px, auto) minmax(0, 1fr); gap: 8px 12px; }
+.task-details dd { margin: 0; overflow-wrap: anywhere; }
+.history-filters { display: grid; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--md-sys-color-outline-variant); }
+.clip-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.clip-metadata { font-size: 13px; overflow-wrap: anywhere; }
+.clip-editor { display: flex; flex-direction: column; gap: 16px; }
+.clip-editor .field-grid { margin: 0; }
+.clip-evidence { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.manifest-json { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 55dvh; overflow: auto; font-size: 12px; }
+.step-head > strong, .step-meta, .step > .muted, .list-item-supporting-text, .file-description > span, .upload-step { font-size: 13px; }
+.log { font-size: 13px; }
+.skip-link { position: fixed; top: 8px; left: 8px; transform: translateY(-160%); z-index: 100; padding: 12px 20px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border-radius: 12px; }
+.skip-link:focus { transform: none; }
+h1, h2, h3 { text-wrap: balance; }
+@media (max-width: 839px) { .download-form-slot, .download-form { min-height: 0; } }
+.task-metadata { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 12px; }
+.task-options { display: grid; gap: 8px; }
+.task-options > div { display: flex; justify-content: space-between; gap: 12px; }
+.task-sources { padding-left: 20px; overflow-wrap: anywhere; }
+.source-url { overflow-wrap: anywhere; font-size: 12px; }
+.single-video-summary { margin-block: 12px; overflow-wrap: anywhere; }
+.clip-editor input { display: block; width: 100%; color: inherit; background: var(--md-sys-color-surface-container-low); border: 1px solid var(--md-sys-color-outline); border-radius: 8px; padding: 12px; }
+.clip-actions { margin-block: 12px; }

@@ -207,13 +207,19 @@ def refine_candidate(
     duration = scope.runtime.config["duration"] if scope else media_duration(media)
     options = BoundaryOptions(candidate.start, candidate.end, duration, context_seconds, minimum_confidence)
 
-    def request(audio_start: float, audio_end: float) -> dict:
+    def request(audio_start: float, audio_end: float, *, correction: str = "") -> dict:
+        audio_duration = audio_end - audio_start
         prompt = (
-            f"{BOUNDARY_PROMPT}{GROUPING_PROMPT}\n目标候选范围是输入音频 "
+            f"{BOUNDARY_PROMPT}{GROUPING_PROMPT}\n本次输入音频总时长为 {audio_duration:.6f} 秒，"
+            f"时间轴从 0 到 {audio_duration:.6f} 秒。所有边界必须满足 "
+            f"0 <= start_seconds < end_seconds <= {audio_duration:.6f}；不要返回原视频绝对时间。"
+            "\n目标候选范围是输入音频 "
             f"{candidate.start - audio_start:.2f}-{candidate.end - audio_start:.2f} 秒。"
         )
         if review_instruction:
             prompt += f"\n待核实疑点（仅为线索）：{review_instruction}"
+        if correction:
+            prompt += f"\n时间校验纠正要求：{correction}"
         return call_with_storage(
             media,
             audio_start,

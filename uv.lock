@@ -168,9 +168,7 @@ name = "bili-music-segmenter"
 version = "0.1.0"
 source = { virtual = "." }
 default-groups = []
-
-[package.dev-dependencies]
-api = [
+dependencies = [
     { name = "boto3" },
     { name = "openai" },
     { name = "opencc-python-reimplemented" },
@@ -178,18 +176,15 @@ api = [
     { name = "shazamio" },
     { name = "yt-dlp" },
 ]
+
+[package.dev-dependencies]
 dev = [
     { name = "pytest" },
     { name = "ruff" },
 ]
-recognizers = [
-    { name = "shazamio" },
-]
 
 [package.metadata]
-
-[package.metadata.requires-dev]
-api = [
+requires-dist = [
     { name = "boto3", specifier = ">=1.35" },
     { name = "openai", specifier = ">=1.68" },
     { name = "opencc-python-reimplemented", specifier = ">=0.1.7" },
@@ -197,11 +192,12 @@ api = [
     { name = "shazamio", specifier = "<0.8" },
     { name = "yt-dlp", specifier = ">=2026.10.26" },
 ]
+
+[package.metadata.requires-dev]
 dev = [
     { name = "pytest", specifier = ">=8.0" },
     { name = "ruff", specifier = ">=0.9" },
 ]
-recognizers = [{ name = "shazamio", specifier = "<0.8" }]
 
 [[package]]
 name = "boto3"

@@ -17,10 +17,10 @@ jobs:
           version: "0.9.26"
           python-version: "3.12"
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
-      - run: uv sync --frozen --group api --group dev
+      - run: uv sync --frozen --group dev
       - run: .venv/bin/ruff check .
       - run: .venv/bin/ruff format --check .
-      - run: timeout 60s uv run --frozen --group api --group dev -m pytest
+      - run: timeout 60s uv run --frozen --group dev -m pytest
   frontend:
     runs-on: ubuntu-latest
     defaults:

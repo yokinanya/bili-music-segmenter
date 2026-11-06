@@ -2,20 +2,16 @@
 name = "bili-music-segmenter"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = []
-
-[dependency-groups]
-recognizers = [
+dependencies = [
     "shazamio<0.8",
-]
-api = [
-    { include-group = "recognizers" },
     "openai>=1.68",
     "opencc-python-reimplemented>=0.1.7",
     "boto3>=1.35",
     "python-dotenv>=1.0",
     "yt-dlp>=2026.10.26",
 ]
+
+[dependency-groups]
 dev = [
     "pytest>=8.0",
     "ruff>=0.9",

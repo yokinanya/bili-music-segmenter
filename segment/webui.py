@@ -106,7 +106,13 @@ class Handler(WorkspaceHTTP):
         identity = route.removeprefix("/api/uploads").removeprefix("/")
         if method == "GET" and not identity:
             referenced = {value for job in self.jobs.store.list("jobs") for value in job["upload_ids"]}
-            files = [{**value, "referenced": value["id"] in referenced} for value in self.jobs.store.list("uploads")]
+            files = [
+                {
+                    **{key: entry for key, entry in value.items() if key != "download_config"},
+                    "referenced": value["id"] in referenced,
+                }
+                for value in self.jobs.store.list("uploads")
+            ]
             self._json(200, {"files": files})
         elif method == "POST" and not identity:
             self._json(201, self.jobs.uploads.register(self._payload()))
@@ -122,6 +128,8 @@ class Handler(WorkspaceHTTP):
         identity, _, action = route.removeprefix("/api/jobs/").partition("/")
         if method == "GET":
             self._job_get(identity, action)
+        elif method == "PUT" and action.startswith("clip/"):
+            self._json(200, {"clip": self.jobs.edit_clip(identity, action.removeprefix("clip/"), self._payload())})
         elif method == "POST" and action == "retry":
             self._json(200, {"id": self.jobs.retry(identity)})
         elif method == "POST" and action == "stop":
@@ -143,6 +151,11 @@ class Handler(WorkspaceHTTP):
             self._json(200, self.jobs.log_chunk(identity, index, offset))
         elif action == "archive":
             self._serve_file(self.jobs.archive(identity), downloadable=True)
+        elif action.startswith("manifest/"):
+            self._serve_file(
+                self.jobs.manifest(identity, action.removeprefix("manifest/")),
+                downloadable=self._query("download") == "1",
+            )
         elif action.startswith("clip/"):
             self._serve_file(
                 self.jobs.clip_path(identity, action.removeprefix("clip/")), downloadable=self._query("download") == "1"

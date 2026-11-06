@@ -189,7 +189,7 @@ class Runtime:
     def _cached(path: Path, stamp: str, spec: dict) -> dict | None:
         if not path.exists():
             return None
-        cached = json.loads(path.read_text())
+        cached = json.loads(path.read_text(encoding="utf-8"))
         if cached["stamp"] != stamp:
             return None
         validate = spec.get("validate")

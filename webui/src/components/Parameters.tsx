@@ -1,13 +1,13 @@
 import type { RunOptions } from '@/lib/types';
 import { Field, Switch } from './Material';
 import { Disclosure } from './Disclosure';
+export { validateParameters } from '@/lib/parameterValidation';
 const FIELDS: { name: keyof RunOptions; label: string; step?: string; min?: string; max?: string }[] = [
   { name: 'minimum_confidence', label: '最低置信度', step: '.01', min: '.01', max: '1' },
   { name: 'minimum_singing_seconds', label: '最短演唱 / 秒', min: '1' },
-  { name: 'scan_concurrency', label: '扫描并发', min: '1' },
-  { name: 'candidate_concurrency', label: '候选并发', min: '1' },
 ];
 const ADVANCED = [
+  ['scan_concurrency', '扫描并发'], ['candidate_concurrency', '候选并发'],
   ['model_concurrency', '模型请求并发'], ['recognizer_concurrency', '识曲请求并发'],
   ['upload_concurrency', 'S3 上传并发'], ['media_concurrency', '媒体进程并发'],
   ['chunk_seconds', '扫描块时长 / 秒'], ['chunk_context_seconds', '扫描上下文 / 秒'],
@@ -21,6 +21,7 @@ export function Parameters({ options, onChange }: { options: RunOptions; onChang
     <Switch label="网易云识曲" checked={options.use_netease} onChange={(value) => set('use_netease', value)} />
     <Switch label="模型判断标题冲突" checked={options.use_title_model} onChange={(value) => set('use_title_model', value)} />
     <Disclosure title="高级设置">
+      <p className="helper">并发决定同时运行的任务数量，不改变结果筛选标准。提高并发会增加内存、显存和网络占用，并可能触发服务限流。</p>
       <div className="field-grid">{ADVANCED.map(([name, label]) => <Field key={name} label={label} value={options[name]} min={name.includes('context') ? '0' : '1'} onChange={(value) => set(name, value)} />)}</div>
     </Disclosure>
   </section>;

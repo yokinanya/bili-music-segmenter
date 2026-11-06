@@ -8,9 +8,16 @@ type Draft = ReturnType<typeof useDraft>;
 export function ImportPanel({ draft, busy }: { draft: Draft; busy: boolean }) {
   const input = useRef<HTMLInputElement>(null);
   const [drag, setDrag] = useState(false);
+  const reselectInput = useRef<HTMLInputElement>(null);
+  const reselectKey = useRef<string | null>(null);
   return <section className="import-panel" aria-labelledby="import-title">
     <div className="section-head"><h2 id="import-title">导入媒体</h2><span className="counter">{draft.files.length}</span></div>
     <input hidden ref={input} type="file" multiple accept="video/*,audio/*,.mkv,.flv,.ts" onChange={(event) => { if (event.target.files) draft.add(event.target.files); event.target.value = ''; }} />
+    <input hidden ref={reselectInput} type="file" accept="video/*,audio/*,.mkv,.flv,.ts" onChange={(event) => {
+      const file = event.target.files?.[0];
+      if (file && reselectKey.current) draft.reselect(reselectKey.current, file);
+      event.target.value = ''; reselectKey.current = null;
+    }} />
     <Button variant="text" disabled={busy} className={`drop-zone ${drag ? 'dragging' : ''}`} onClick={() => input.current?.click()}
       onDragOver={(event) => { event.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
       onDrop={(event) => { event.preventDefault(); setDrag(false); if (!busy) draft.add(event.dataTransfer.files); }}>
@@ -30,7 +37,10 @@ export function ImportPanel({ draft, busy }: { draft: Draft; busy: boolean }) {
             <IconButton label="下移" disabled={busy || index === draft.files.length - 1} onClick={() => draft.move(file.key, 1)}><Icon name="down" /></IconButton>
             <IconButton label="移除文件" disabled={busy} onClick={() => void draft.remove(file)}><Icon name="close" /></IconButton>
           </>}
-          {['failed', 'cancelled'].includes(file.state) && file.file && <Button disabled={busy} variant="text" onClick={() => void draft.upload(file).catch(() => undefined)}>重试上传</Button>}
+          {['pending', 'failed', 'cancelled'].includes(file.state) && !file.file && <Button disabled={busy} variant="text" onClick={() => {
+            reselectKey.current = file.key; reselectInput.current?.click();
+          }}>重新选择原文件</Button>}
+          {['failed', 'cancelled'].includes(file.state) && file.file && <Button disabled={busy} variant="text" onClick={() => void draft.retry(file)}>重试上传</Button>}
         </div>
       </li>)}
     </ol>

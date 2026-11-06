@@ -4,10 +4,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg git node
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --group api
+RUN uv sync --frozen
 ENV PATH="/app/.venv/bin:$PATH"
 COPY . .
 # Build the WebUI bundle at image build time so the container never needs Node at runtime.
 RUN cd webui && npm ci --no-audit --no-fund && npm run release && rm -rf node_modules .next out
 
-CMD ["uv", "run", "--frozen", "--group", "api", "-m", "segment.webui", "--host", "0.0.0.0"]
+CMD ["uv", "run", "--frozen", "-m", "segment.webui", "--host", "0.0.0.0"]

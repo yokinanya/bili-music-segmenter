@@ -1,6 +1,7 @@
 'use client';
 import { createElement, useEffect, useRef, useState, type ReactNode } from 'react';
 import { dialogAnimation, useReducedMotion } from '@/lib/materialMotion';
+import type { MaterialInput } from '@/lib/parameterValidation';
 export { ActionLink, Button, IconButton, ListButton } from './MaterialActions';
 
 export function useMaterial() {
@@ -23,20 +24,45 @@ export function useMaterial() {
 interface TextFieldProps {
   label: string; value: string; onChange: (value: string) => void;
   type?: 'text' | 'url' | 'textarea'; rows?: number; disabled?: boolean;
-  autocomplete?: string;
+  autocomplete?: string; required?: boolean; pattern?: string;
 }
 export function TextField({ onChange, ...props }: TextFieldProps) {
+  const [error, setError] = useState('');
   return createElement('md-outlined-text-field', { ...props, 'aria-label': props.label,
-    onInput: (event: Event) => onChange((event.target as HTMLInputElement).value) });
+    error: Boolean(error), errorText: error,
+    onInvalid: (event: Event) => setError((event.target as MaterialInput).validationMessage),
+    onBlur: (event: Event) => {
+      const field = event.target as MaterialInput;
+      setError(field.checkValidity() ? '' : field.validationMessage);
+    },
+    onInput: (event: Event) => {
+      const field = event.target as MaterialInput;
+      onChange(field.value); setError(field.checkValidity() ? '' : field.validationMessage);
+    } });
 }
 interface FieldProps {
   label: string; value: number; onChange: (value: number) => void;
   step?: string; min?: string; max?: string;
 }
 export function Field({ onChange, step = '1', min = '0', ...props }: FieldProps) {
-  return createElement('md-outlined-text-field', { ...props, type: 'number', step, min,
-    'aria-label': props.label, value: String(props.value),
-    onInput: (event: Event) => onChange(Number((event.target as HTMLInputElement).value)) });
+  const [editing, setEditing] = useState<{ raw: string; committed: number } | null>(null);
+  const [error, setError] = useState('');
+  const raw = editing && editing.committed === props.value ? editing.raw : String(props.value);
+  return createElement('md-outlined-text-field', { ...props, type: 'number', step, min, required: true,
+    'aria-label': props.label, value: raw, error: Boolean(error), errorText: error,
+    onInvalid: (event: Event) => setError((event.target as MaterialInput).validationMessage),
+    onBlur: (event: Event) => {
+      const field = event.target as MaterialInput;
+      setError(field.checkValidity() ? '' : field.validationMessage);
+    },
+    onInput: (event: Event) => {
+      const field = event.target as MaterialInput;
+      const valid = field.checkValidity() && field.value.trim() !== '' && Number.isFinite(Number(field.value));
+      const value = valid ? Number(field.value) : props.value;
+      setEditing({ raw: field.value, committed: value });
+      setError(valid ? '' : field.validationMessage || '请输入有效数值');
+      if (valid) onChange(value);
+    } });
 }
 export function Switch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
   return <label className='switch-row'><span>{label}</span>{createElement('md-switch', {

@@ -2,7 +2,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from event_capture import capture_events
+from event_capture import capture_events, child_sends
 from workspace_support import make_jobs, start, wait_for, wait_for_job
 
 from segment.music_agent.cli import build_parser
@@ -61,9 +61,8 @@ def test_usage_recorded_even_if_model_json_invalid(monkeypatch, tmp_path):
 
 def test_subprocess_usage_persisted_and_separate_from_logs(tmp_path):
     data = event(usage={"prompt_tokens": 100, "completion_tokens": 20})
-    line = (EVENT_PREFIX + json.dumps(data) + "\n").encode()
-    code = f"import os; os.write(int(os.environ['MUSIC_AGENT_EVENTS_FD']), {line!r}); print('normal log')"
-    jobs = make_jobs(tmp_path, code)
+    line = EVENT_PREFIX + json.dumps(data) + "\n"
+    jobs = make_jobs(tmp_path, child_sends(line) + "; print('normal log')")
     try:
         job_id = start(jobs)
         wait_for_job(jobs, job_id)

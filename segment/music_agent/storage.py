@@ -85,6 +85,7 @@ def create_storage(config: ApiConfig) -> S3Storage:
         aws_secret_access_key=config.s3_access_secret,
         config=Config(
             signature_version="s3v4",
+            request_checksum_calculation="when_required",
             s3={"addressing_style": config.s3_addressing_style},
             user_agent=config.s3_user_agent,
         ),

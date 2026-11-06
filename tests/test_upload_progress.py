@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import Mock
 
 import pytest
-from event_capture import capture_events
+from event_capture import capture_events, child_sends
 from workspace_support import make_jobs, start, wait_for, wait_for_job
 
 from segment.music_agent.storage import S3Storage
@@ -47,9 +47,8 @@ def test_callbacks_are_thread_safe(monkeypatch, tmp_path):
 
 def test_upload_progress_crosses_process_pipe(tmp_path):
     event = {"key": "scan.wav", "total_bytes": 100, "transferred_bytes": 40, "state": "failed"}
-    line = (UPLOAD_PREFIX + json.dumps(event) + "\n").encode()
-    code = f"import os; os.write(int(os.environ['MUSIC_AGENT_EVENTS_FD']), {line!r}); print('normal log')"
-    jobs = make_jobs(tmp_path, code)
+    line = UPLOAD_PREFIX + json.dumps(event) + "\n"
+    jobs = make_jobs(tmp_path, child_sends(line) + "; print('normal log')")
     try:
         job_id = start(jobs)
         wait_for_job(jobs, job_id)

@@ -17,9 +17,11 @@ export interface ProgressStep {
 export interface BatchItem {
   id: string; upload_id: string; media: string; state: JobState; steps: ProgressStep[];
   error: string | null; started_at: string | null; finished_at: string | null;
+  source_type?: 'upload' | 'download'; source_url?: string; can_reuse?: boolean;
   upload?: { uploads: { key: string; total_bytes: number; transferred_bytes: number; state: string }[] };
 }
-export interface Clip { id: string; media_id: string; name: string; title: string; artist: string; duration_seconds: number }
+export interface Clip { id: string; media_id: string; name: string; title: string; artist: string; duration_seconds: number; start_seconds: number; end_seconds: number; source_name: string; recognition?: unknown; title_resolution?: unknown }
+export interface ClipEdit { title: string; artist: string; start_seconds: number; end_seconds: number }
 export interface ModelUsage { model: string; calls: number; missing_usage: number; input_tokens: number; output_tokens: number; cached_tokens: number; estimated_cny: number | null }
 export interface UsageSnapshot { models: ModelUsage[]; calls: number; input_tokens: number; output_tokens: number; cached_tokens: number; estimated_cny: number; complete: boolean }
 export interface JobAttempt { number: number; state: JobState; started_at: string; finished_at: string; usage: UsageSnapshot }
