@@ -8,8 +8,10 @@ from dataclasses import asdict
 from pathlib import Path
 
 from segment.music_agent.detection import Candidate
+from segment.music_agent.export_inventory import initialize_inventory, remove_superseded_exports
 from segment.music_agent.final_review import apply_recheck, request_audit
 from segment.music_agent.manifest import write_manifest
+from segment.music_agent.overlap_review import reconcile_overlaps
 from segment.music_agent.pipeline_candidates import prepare_candidate, recognize_interval
 from segment.music_agent.pipeline_context import PipelineContext
 from segment.music_agent.runtime import fingerprint
@@ -17,6 +19,7 @@ from segment.music_agent.runtime import fingerprint
 
 async def execute_pipeline(context: PipelineContext) -> Path:
     runtime = context.runtime
+    initialize_inventory(context.output)
     duration = await asyncio.to_thread(
         runtime.run, context.spec("probe", "媒体分析", {}), lambda: context.services.calls["duration"](context.media)
     )
@@ -48,16 +51,35 @@ async def execute_pipeline(context: PipelineContext) -> Path:
             spec,
             lambda: request_audit(ordered, context.services.review_context(context), context.services.calls["text"]),
         )
-        by_index = {item["candidate_index"]: item for item in requests}
-        async for original, result in _parallel(
-            ordered, lambda item: _finish_record(item, by_index.get(item["index"]), context), context
-        ):
-            records[original["index"]] = result
-            runtime.advance("finalize", "最终复核与导出", len(ordered))
+        async for finalized in _finalize(ordered, requests, context):
+            records = {record["index"]: record for record in finalized}
             persist()
         persist()
+        remove_superseded_exports(context.output, list(records.values()))
         runtime.event("complete", "结果整理", state="succeeded", completed=1, total=1)
         return manifest
+
+
+async def _finalize(ordered: list, requests: list, context: PipelineContext):
+    records = {record["index"]: record for record in ordered}
+    by_index = {item["candidate_index"]: item for item in requests}
+    async for original, result in _parallel(
+        ordered, lambda item: _finish_record(item, by_index.get(item["index"]), context), context
+    ):
+        records = {**records, original["index"]: result}
+        yield list(records.values())
+    reviewed = sorted(records.values(), key=lambda item: item["index"])
+    resolved = await asyncio.to_thread(
+        context.runtime.run,
+        context.spec("overlap-review", "跨候选联合复核", reviewed),
+        lambda: reconcile_overlaps(reviewed, context),
+    )
+    records = {record["index"]: record for record in resolved}
+    yield list(records.values())
+    async for original, result in _parallel(resolved, lambda item: _export_record(item, context), context):
+        records = {**records, original["index"]: result}
+        context.runtime.advance("finalize", "最终复核与导出", len(ordered))
+        yield list(records.values())
 
 
 async def _scan(context: PipelineContext) -> tuple[list, list]:
@@ -128,6 +150,10 @@ async def _finish_record(record: dict, request: dict | None, context: PipelineCo
                 refine=context.services.calls["refine"],
             ),
         )
+    return current
+
+
+async def _export_record(current: dict, context: PipelineContext) -> dict:
     intervals = []
     for interval in current.get("singing_intervals", []):
         prepared = interval
