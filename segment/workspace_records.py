@@ -20,7 +20,7 @@ def usage_snapshot(events: list[dict]) -> dict:
 
 def new_job(uploads: list[dict], options: dict, request_id: str, root) -> dict:
     identity = uuid4().hex
-    items = [_new_item(upload, root / "jobs" / identity) for upload in uploads]
+    items = [new_item(upload, root / "jobs" / identity) for upload in uploads]
     return {
         "id": identity,
         "request_id": request_id,
@@ -43,7 +43,7 @@ def new_job(uploads: list[dict], options: dict, request_id: str, root) -> dict:
     }
 
 
-def _new_item(upload: dict, root) -> dict:
+def new_item(upload: dict, root) -> dict:
     identity = uuid4().hex
     folder = root / identity
     folder.mkdir(parents=True)

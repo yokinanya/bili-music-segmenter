@@ -16,6 +16,7 @@ from segment.music_agent.models import call_with_storage, text_model_call
 from segment.music_agent.pipeline import execute_pipeline
 from segment.music_agent.pipeline_context import PipelineContext
 from segment.music_agent.pipeline_services import PipelineServices
+from segment.music_agent.qqmusic_client import search_lyrics
 from segment.music_agent.recognition import deterministic_title_choice, recognize_audio, resolve_title_with_model
 from segment.music_agent.runtime import create_runtime
 from segment.music_agent.storage import create_storage
@@ -97,6 +98,7 @@ def _services(options: dict) -> PipelineServices:
             "scan": scan_candidates,
             "refine": refine_candidate,
             "recognize": recognize_audio,
+            "qqmusic": search_lyrics,
             "text": text_model_call,
             "audio": call_with_storage,
             "choose_title": deterministic_title_choice,

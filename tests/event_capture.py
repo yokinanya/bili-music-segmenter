@@ -29,7 +29,8 @@ def capture_events(monkeypatch, tmp_path) -> EventCapture:
 
 def send_raw(line: str) -> None:
     """Write one already-serialized event line through the production writer."""
-    emit_event("", json.loads(line))
+    payload_start = line.index("{")
+    emit_event(line[:payload_start], json.loads(line[payload_start:]))
 
 
 def child_sends(line: str) -> str:

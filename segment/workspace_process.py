@@ -39,6 +39,7 @@ def command_for(item: dict) -> list[str]:
             item["download_config"],
             "--outdir",
             item["outdir"],
+            *(["--discover-only"] if item.get("discover_only") else []),
         ]
     return [
         sys.executable,

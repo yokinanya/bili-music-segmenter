@@ -19,6 +19,7 @@ from segment.music_agent.media_cache import clean_local_cache
 from segment.music_agent.storage import create_storage
 from segment.usage import UsageTotals
 from segment.webui_jobs import Jobs
+from segment.workspace_edit_stream import STREAM_CONTENT_TYPE, stream_edit
 from segment.workspace_execution import Execution
 from segment.workspace_http import HOST, WorkspaceHTTP
 from segment.workspace_process import ProcessRunner
@@ -129,7 +130,10 @@ class Handler(WorkspaceHTTP):
         if method == "GET":
             self._job_get(identity, action)
         elif method == "PUT" and action.startswith("clip/"):
-            self._json(200, {"clip": self.jobs.edit_clip(identity, action.removeprefix("clip/"), self._payload())})
+            if self.headers.get("Accept") == STREAM_CONTENT_TYPE:
+                stream_edit(self, identity, action.removeprefix("clip/"))
+            else:
+                self._json(200, {"clip": self.jobs.edit_clip(identity, action.removeprefix("clip/"), self._payload())})
         elif method == "POST" and action == "retry":
             self._json(200, {"id": self.jobs.retry(identity)})
         elif method == "POST" and action == "stop":
@@ -157,9 +161,8 @@ class Handler(WorkspaceHTTP):
                 downloadable=self._query("download") == "1",
             )
         elif action.startswith("clip/"):
-            self._serve_file(
-                self.jobs.clip_path(identity, action.removeprefix("clip/")), downloadable=self._query("download") == "1"
-            )
+            clip = self.jobs.clip_info(identity, action.removeprefix("clip/"))
+            self._serve_file(Path(clip["path"]), downloadable=self._query("download") == "1", filename=clip["name"])
         else:
             self._json(404, {"error": "地址不存在"})
 

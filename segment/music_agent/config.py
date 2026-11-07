@@ -39,17 +39,14 @@ def load_config() -> ApiConfig:
     missing = [name for name in names if not values[name]]
     if missing:
         raise ValueError(f"请在 .env 配置必填项：{', '.join(missing)}")
-    base_url = values["DASHSCOPE_BASE_URL"]
-    parsed = urlsplit(base_url)
-    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
-        raise ValueError("DASHSCOPE_BASE_URL 必须是与 API key 对应的 HTTPS 接入地址")
+    base_url = _model_base_url(values["DASHSCOPE_BASE_URL"])
     endpoint = _s3_endpoint(values["S3_ENDPOINT"])
     addressing_style = os.getenv("S3_ADDRESSING_STYLE", "path").strip()
     if addressing_style not in {"path", "virtual", "auto"}:
         raise ValueError("S3_ADDRESSING_STYLE 必须是 path、virtual 或 auto")
     return ApiConfig(
         api_key=values["DASHSCOPE_API_KEY"],
-        base_url=base_url.rstrip("/"),
+        base_url=base_url,
         s3_access_key=values["S3_ACCESS_KEY_ID"],
         s3_access_secret=values["S3_ACCESS_KEY_SECRET"],
         s3_endpoint=endpoint.rstrip("/"),
@@ -59,6 +56,18 @@ def load_config() -> ApiConfig:
         s3_addressing_style=addressing_style,
         s3_user_agent=os.getenv("S3_USER_AGENT", "").strip() or None,
     )
+
+
+def _model_base_url(base_url: str) -> str:
+    if base_url.startswith("sk-"):
+        raise ValueError(
+            "DASHSCOPE_BASE_URL 填入了 API key，请检查是否与 DASHSCOPE_API_KEY 填反。"
+            "DASHSCOPE_BASE_URL 应填写 HTTPS 接入地址"
+        )
+    parsed = urlsplit(base_url)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("DASHSCOPE_BASE_URL 必须是与 API key 对应的 HTTPS 接入地址")
+    return base_url.rstrip("/")
 
 
 def _s3_endpoint(endpoint: str) -> str:

@@ -35,9 +35,28 @@ def cookie_jar(config: dict, downloader) -> None:
     if not parsed:
         raise ValueError("Cookie 无法解析，请填写 Cookie 请求头或 Netscape cookies.txt 内容")
     host = urlsplit(config["url"]).hostname
+    # Raw Bilibili cookies belong to the destination site of a b23 short link.
+    if host == "b23.tv" or (host and host.endswith(".b23.tv")):
+        host = ".bilibili.com"
     for name, value in parsed.items():
         entry = http.cookiejar.Cookie(
-            0, name, value.value, None, False, host, False, False, "/", True, False, None, True, None, None, {}, False
+            0,
+            name,
+            value.value,
+            None,
+            False,
+            host,
+            host.startswith("."),
+            host.startswith("."),
+            "/",
+            True,
+            False,
+            None,
+            True,
+            None,
+            None,
+            {},
+            False,
         )
         downloader.cookiejar.set_cookie(entry)
 
@@ -77,26 +96,17 @@ class DownloadProgress:
 
 
 def download_source(config: dict, *, factory, store: DocumentStore) -> Path:
+    progress = DownloadProgress()
+    config = _resolve(config, factory=factory, progress=progress)
     document = store.get("uploads", config["upload_id"])
     destination = Path(config["folder"]) / "source.mkv"
-    progress = DownloadProgress()
     if document["state"] == "ready" and destination.is_file() and file_digest(destination) == document["sha256"]:
         progress.report("download", "复用已下载视频", state="reused")
         _ready_event(document, destination)
         return destination
-    options = {
-        "outtmpl": str(Path(config["folder"]) / "source.%(ext)s"),
-        "noplaylist": True,
-        "merge_output_format": "mkv",
-        "quiet": True,
-        "noprogress": True,
-        "progress_hooks": [progress.progress],
-        "postprocessor_hooks": [progress.postprocess],
-        "postprocessors": [{"key": "FFmpegVideoRemuxer", "preferedformat": "mkv"}],
-    }
     store.put("uploads", {**document, "state": "downloading", "error": None})
     try:
-        with factory(options) as downloader:
+        with factory(_download_options(config, progress)) as downloader:
             cookie_jar(config, downloader)
             info = downloader.extract_info(config["url"], download=True)
         if not destination.is_file() or destination.stat().st_size <= 0:
@@ -118,6 +128,35 @@ def download_source(config: dict, *, factory, store: DocumentStore) -> Path:
         raise
 
 
+def _download_options(config: dict, progress: DownloadProgress) -> dict:
+    return {
+        "outtmpl": str(Path(config["folder"]) / "source.%(ext)s"),
+        "noplaylist": True,
+        "merge_output_format": "mkv",
+        "quiet": True,
+        "noprogress": True,
+        "progress_hooks": [progress.progress],
+        "postprocessor_hooks": [progress.postprocess],
+        "postprocessors": [{"key": "FFmpegVideoRemuxer", "preferedformat": "mkv"}],
+    }
+
+
+def _resolve(config: dict, *, factory, progress: DownloadProgress) -> dict:
+    from segment.workspace_parts import is_bilibili_video, resolve_source
+
+    if not config.get("resolve_parts", is_bilibili_video(config["url"])):
+        return config
+    progress.report("resolve", "读取视频分 P", state="running")
+    try:
+        resolved, sources = resolve_source(config, factory=factory, configure_cookies=cookie_jar)
+        emit_event(DOWNLOAD_PREFIX, {"state": "sources", "sources": sources})
+        progress.report("resolve", "读取视频分 P", state="succeeded")
+        return resolved
+    except Exception as error:
+        progress.report("resolve", "读取视频分 P", state="failed", error=str(error))
+        raise
+
+
 def _ready_event(document: dict, destination: Path) -> None:
     emit_event(
         DOWNLOAD_PREFIX,
@@ -131,8 +170,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-config", type=Path, required=True)
     parser.add_argument("--outdir", type=Path, required=True)
+    parser.add_argument("--discover-only", action="store_true")
     args = parser.parse_args()
     config = json.loads(args.source_config.read_text(encoding="utf-8"))
+    if args.discover_only:
+        _resolve({**config, "resolve_parts": True}, factory=YoutubeDL, progress=DownloadProgress())
+        return
     store = DocumentStore(Path(os.environ["MUSIC_AGENT_STATE_DIR"]) / "workspace.sqlite3")
     source = download_source(config, factory=YoutubeDL, store=store)
     os.environ["MUSIC_AGENT_SOURCE_DIGEST"] = store.get("uploads", config["upload_id"])["sha256"]

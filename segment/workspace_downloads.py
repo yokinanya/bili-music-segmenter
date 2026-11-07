@@ -27,17 +27,25 @@ def validate_download(payload: dict) -> tuple[str, str]:
     return url.strip(), cookie
 
 
-def register_download(root: Path, store, *, url: str, cookie: str) -> dict:
+def register_download(
+    root: Path, store, *, url: str, cookie: str, name: str | None = None, resolve_parts=False
+) -> dict:
     identity = uuid4().hex
     folder = root / "uploads" / identity
     folder.mkdir(parents=True)
     config = folder / "download.json"
-    secret = {"url": url, "cookie": cookie, "folder": str(folder), "upload_id": identity}
+    secret = {
+        "url": url,
+        "cookie": cookie,
+        "folder": str(folder),
+        "upload_id": identity,
+        "resolve_parts": resolve_parts,
+    }
     with os.fdopen(os.open(config, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as target:
         json.dump(secret, target, ensure_ascii=False)
     document = {
         "id": identity,
-        "name": urlsplit(url).hostname + ".mkv",
+        "name": name or urlsplit(url).hostname + ".mkv",
         "size_bytes": 0,
         "state": "pending",
         "created_at": now(),

@@ -54,7 +54,7 @@ export function HistoryPanel({ onRerun, onResume, onRedownload, selectedId, onSe
         {task.job.batch.some((item) => item.can_reuse === false) && <span className="helper">源视频不可用，无法复用</span>}
         {onRedownload && task.job.batch.some((item) => item.source_url) && <Button onClick={() => onRedownload(task.job!)}>重新下载原链接</Button>}
       </>}
-      {['failed', 'cancelled', 'interrupted'].includes(task.job.state) && <Button variant="filled" onClick={() => void act(async () => { await api.retry(task.job!.id); onResume(task.job!.id); task.retry(); })}>续跑未完成步骤</Button>}
+      {(task.job.can_complete_parts || ['failed', 'cancelled', 'interrupted'].includes(task.job.state)) && <Button variant="filled" onClick={() => void act(async () => { await api.retry(task.job!.id); onResume(task.job!.id); task.retry(); })}>{task.job.can_complete_parts ? '补齐分 P' : '续跑未完成步骤'}</Button>}
       {isActive(task.job.state) ? <Button onClick={() => void act(() => api.stop(task.job!.id))}>停止任务</Button> : <Button variant="text" onClick={() => setDeleting(true)}>{task.job.state === 'cleanup_pending' ? '再次清理' : '删除任务'}</Button>}
     </>} />}
     {!task.job && <div className="panel history-empty empty">{task.error ? <div className="error" role="alert">{task.error}<Button onClick={task.retry}>重新读取详情</Button></div> : selected ? '正在读取…' : '选择历史任务'}</div>}

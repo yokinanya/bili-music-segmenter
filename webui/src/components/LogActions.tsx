@@ -37,7 +37,7 @@ export function LogActions({ jobId, index }: { jobId: string; index: number }) {
       <Button variant="text" disabled={busy} onClick={() => void exportLog(true)}>复制完整日志</Button>
       <Button variant="text" disabled={busy} onClick={() => void exportLog(false)}>下载完整日志</Button>
     </div>
-    {message && <p role="status" className="log-status">{message}（运行中日志以读取到末尾时为准）</p>}
+    {message && <p role="status" className="log-status">{message}</p>}
     {error && <p role="alert" className="error">日志导出失败：{error}</p>}
   </>;
 }

@@ -7,7 +7,9 @@ from workspace_support import make_jobs, start, wait_for, wait_for_job
 
 from segment.music_agent.cli import build_parser
 from segment.music_agent.models import text_model_call
+from segment.music_agent.runtime import PROGRESS_PREFIX
 from segment.usage import EVENT_PREFIX, UsageTotals
+from segment.workspace_records import usage_snapshot
 
 
 def event(model="qwen3.8-flash", usage=None):
@@ -40,6 +42,78 @@ def test_missing_usage_and_unknown_model():
     assert not result["complete"]
     assert result["models"][0]["missing_usage"] == 1
     assert result["models"][1]["estimated_cny"] is None
+
+
+@pytest.mark.parametrize(
+    "usage",
+    [
+        {"prompt_tokens": -1, "completion_tokens": 2},
+        {"prompt_tokens": None, "completion_tokens": 2},
+        {"prompt_tokens": "10", "completion_tokens": 2},
+        {"prompt_tokens": True, "completion_tokens": 2},
+        {"prompt_tokens": 10, "completion_tokens": -1},
+        {"prompt_tokens": 10, "completion_tokens": 1.5},
+        {"prompt_tokens": 10, "completion_tokens": 2, "prompt_tokens_details": {"cached_tokens": -1}},
+        {"prompt_tokens": 10, "completion_tokens": 2, "prompt_tokens_details": {"cached_tokens": 11}},
+    ],
+)
+def test_invalid_token_counts_are_missing_usage_and_do_not_modify_input(usage, caplog):
+    totals = UsageTotals()
+    invalid = event(usage=usage)
+    validated = totals.add(invalid)
+    assert invalid["usage"] is usage
+    assert validated["usage"] is None
+    totals.add(event(usage={"prompt_tokens": 10, "completion_tokens": 2}))
+    result = totals.snapshot()
+    assert result["calls"] == 2
+    assert result["input_tokens"] == 10 and result["output_tokens"] == 2
+    assert result["models"][0]["missing_usage"] == 1
+    assert not result["complete"]
+    assert result["estimated_cny"] == pytest.approx(0.0000134)
+    assert "已忽略" in caplog.text
+
+
+def test_historical_invalid_tokens_do_not_block_usage_snapshot():
+    result = usage_snapshot([event(usage={"prompt_tokens": -1, "completion_tokens": 2})])
+    assert result["calls"] == 1 and result["models"][0]["missing_usage"] == 1
+    assert not result["complete"]
+
+
+def test_non_token_schema_errors_still_surface():
+    with pytest.raises(KeyError, match="completion_tokens"):
+        UsageTotals().add(event(usage={"prompt_tokens": 10}))
+
+
+def test_invalid_usage_does_not_stop_subsequent_process_events(tmp_path, caplog):
+    invalid = EVENT_PREFIX + json.dumps(event(usage={"prompt_tokens": -1, "completion_tokens": 2}))
+    valid = EVENT_PREFIX + json.dumps(event(usage={"prompt_tokens": 10, "completion_tokens": 2}))
+    progress = PROGRESS_PREFIX + json.dumps(
+        {
+            "id": "scan",
+            "attempt": 1,
+            "sequence": 1,
+            "state": "succeeded",
+            "label": "分块扫描",
+        }
+    )
+    code = "; ".join(child_sends(line) for line in (invalid, valid, progress))
+    jobs = make_jobs(tmp_path, code)
+    try:
+        identity = start(jobs)
+        result = wait_for_job(jobs, identity)
+        assert result["state"] == "succeeded" and result["error"] is None
+        assert result["batch"][0]["steps"][0]["id"] == "scan"
+        assert result["usage"]["input_tokens"] == 10
+        assert result["usage"]["models"][0]["missing_usage"] == 1
+        assert not result["usage"]["complete"]
+        assert jobs.usage.snapshot() == result["usage"]
+        saved = jobs.store.get("jobs", identity)
+        assert saved["usage_events"][0]["usage"] is None
+        assert saved["usage_events"][1]["usage"]["prompt_tokens"] == 10
+        assert saved["attempts"][0]["usage"] == result["usage"]
+        assert caplog.text.count("已忽略") == 1
+    finally:
+        jobs.close()
 
 
 def test_usage_recorded_even_if_model_json_invalid(monkeypatch, tmp_path):

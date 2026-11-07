@@ -5,6 +5,7 @@ from __future__ import annotations
 from queue import Queue
 from threading import Event, Lock, Thread
 
+from segment.workspace_parts import expand_parts
 from segment.workspace_process import stop_process
 from segment.workspace_records import attempt_record, end_steps, reduce_event, replace_item
 from segment.workspace_results import read_clips
@@ -71,45 +72,31 @@ class Execution:
         self.store.update("jobs", identity, self._finish)
 
     def _run_items(self, identity: str) -> None:
-        initial = self.store.get("jobs", identity)
-        for index, item in enumerate(initial["batch"]):
+        index = 0
+        while index < len(self.store.get("jobs", identity)["batch"]):
+            current = index
+            index += 1
+            item = self.store.get("jobs", identity)["batch"][current]
             if item["state"] == "succeeded":
                 continue
             job = self.store.get("jobs", identity)
             if self._closing.is_set() or job["stop_requested"]:
                 self._update_item(
-                    identity, index, state="interrupted" if self._closing.is_set() else "cancelled", finished_at=now()
+                    identity, current, state="interrupted" if self._closing.is_set() else "cancelled", finished_at=now()
                 )
                 continue
-            self._execute(identity, index)
+            self._execute(identity, current)
 
     def _execute(self, identity: str, index: int) -> None:
         self._update_item(identity, index, state="running", started_at=now(), error=None)
         job = self.store.get("jobs", identity)
         self.store.update("jobs", identity, lambda value: {**value, "current_index": index})
-        attempt = job["attempt"]
-
-        def report(kind, event):
-            if kind == "usage":
-                self.usage.add(event)
-            self.store.update(
-                "jobs",
-                identity,
-                lambda value: reduce_event(
-                    value,
-                    index,
-                    kind=kind,
-                    event=event,
-                    attempt=attempt,
-                ),
-            )
-
         try:
             code = self.runner.run(
                 job,
                 job["batch"][index],
                 state_dir=self.root,
-                report=report,
+                report=self._reporter(job, index),
                 started=lambda process: self._started(identity, process),
             )
             state = "succeeded" if code == 0 else "failed"
@@ -124,12 +111,34 @@ class Execution:
                 returncode=code,
                 finished_at=now(),
                 error=None if state == "succeeded" else f"执行进程退出：{code}",
+                discover_only=job["batch"][index].get("discover_only", False) and state != "succeeded",
             )
         except Exception as error:
             self._update_item(identity, index, state="failed", error=str(error), finished_at=now())
         finally:
             with self._lock:
                 self._processes.pop(identity, None)
+
+    def _expand(self, identity: str, index: int, sources: list[dict]) -> None:
+        with self.store.transaction() as store:
+            job = store.get("jobs", identity)
+            expanded = expand_parts(job, index, sources=sources, store=store, root=self.root)
+            store.put("jobs", expanded)
+
+    def _reporter(self, job: dict, index: int):
+        def report(kind, event):
+            if kind == "download" and event["state"] == "sources":
+                self._expand(job["id"], index, event["sources"])
+                return
+            if kind == "usage":
+                event = self.usage.add(event)
+            self.store.update(
+                "jobs",
+                job["id"],
+                lambda value: reduce_event(value, index, kind=kind, event=event, attempt=job["attempt"]),
+            )
+
+        return report
 
     def _update_item(self, identity: str, index: int, **changes) -> None:
         def update(job):

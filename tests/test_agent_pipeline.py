@@ -59,7 +59,7 @@ def test_boundaries_can_extend_into_context_but_not_outside_audio(monkeypatch):
     assert intervals == [(90, 165)]
 
 
-def test_background_skip_and_successful_export_pipeline(tmp_path, monkeypatch):
+def _prepare_export_pipeline(monkeypatch):
     config = ApiConfig("test", "https://example.com/v1", "id", "secret", "endpoint", "bucket", "test", "us-east-1")
     monkeypatch.setattr(agent, "load_config", lambda: config)
     monkeypatch.setattr(agent, "text_model_call", lambda *a: {"data": {"summary": "ok", "rechecks": []}, "usage": None})
@@ -79,8 +79,34 @@ def test_background_skip_and_successful_export_pipeline(tmp_path, monkeypatch):
         calls.append(args)
         return {"shazam": {"status": "matched", "title": "稻香", "artist": "周杰伦"}}
 
+    monkeypatch.setattr(
+        agent,
+        "resolve_audio_title",
+        lambda *args: {
+            "title": "稻香",
+            "artist": "周杰伦",
+            "status": "audio_verified",
+            "audio_review": {"data": {"lyrics_evidence": "还记得你说家是唯一的城堡", "confidence": 0.9}},
+        },
+    )
+
+    async def qq_search(query):
+        return [{"id": 1, "mid": "test-mid", "title": "稻香", "artist": "周杰伦", "lyrics": "还记得你说家是唯一的城堡"}]
+
+    monkeypatch.setattr(agent, "search_lyrics", qq_search)
     monkeypatch.setattr(agent, "recognize_audio", recognize)
-    monkeypatch.setattr(agent, "export_video", lambda *args: args[-1].write_bytes(b"clip"))
+    return calls
+
+
+def test_background_skip_and_successful_export_pipeline(tmp_path, monkeypatch):
+    calls = _prepare_export_pipeline(monkeypatch)
+    exports = []
+
+    def export(*args):
+        exports.append(args[1:3])
+        args[-1].write_bytes(b"clip")
+
+    monkeypatch.setattr(agent, "export_video", export)
     media = tmp_path / "input.mp4"
     media.touch()
     manifest = asyncio.run(agent.run_agent(media, tmp_path / "out"))
@@ -89,7 +115,16 @@ def test_background_skip_and_successful_export_pipeline(tmp_path, monkeypatch):
     assert result["exported_count"] == 1
     assert result["candidates_completed"] == 2
     assert result["candidates"][0]["decision"] == "background_music_skipped"
-    assert "稻香" in result["candidates"][1]["singing_intervals"][0]["file"]
+    interval = result["candidates"][1]["singing_intervals"][0]
+    assert "稻香" in interval["file"]
+    assert interval["title_resolution"]["qqmusic"]["status"] == "matched"
+    assert exports == [(110, 152)]
+    assert interval["end_seconds"] == 152
+    assert interval["duration_seconds"] == 42
+    resumed = asyncio.run(agent.run_agent(media, tmp_path / "out"))
+    replayed = json.loads(resumed.read_text())["candidates"][1]["singing_intervals"][0]
+    assert replayed == interval
+    assert exports == [(110, 152)]
 
 
 def test_zero_candidates_still_produces_manifest(tmp_path, monkeypatch):

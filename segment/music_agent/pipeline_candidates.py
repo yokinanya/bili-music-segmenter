@@ -7,11 +7,16 @@ from dataclasses import asdict
 from pathlib import Path
 
 from segment.music_agent.pipeline_context import PipelineContext
+from segment.music_agent.qqmusic import apply_verification
 from segment.music_agent.runtime import fingerprint
+
+TITLE_PIPELINE_VERSION = "qqmusic-lyrics-v1"
 
 
 async def prepare_candidate(candidate, context: PipelineContext) -> dict:
-    spec = context.spec(f"candidate/{candidate.index}", f"候选 {candidate.index}", asdict(candidate))
+    spec = context.spec(
+        f"candidate/{candidate.index}", f"候选 {candidate.index}", [TITLE_PIPELINE_VERSION, asdict(candidate)]
+    )
     return await context.runtime.async_run(spec, lambda: _prepare(candidate, context))
 
 
@@ -42,7 +47,9 @@ async def _prepare(candidate, context: PipelineContext) -> dict:
 
 async def recognize_interval(interval: dict, context: PipelineContext, candidate=None) -> dict:
     spec = context.spec(
-        "identify/" + fingerprint(interval), "识曲与标题判断", [interval, asdict(candidate) if candidate else None]
+        "identify/" + fingerprint(interval),
+        "识曲与标题判断",
+        [TITLE_PIPELINE_VERSION, interval, asdict(candidate) if candidate else None],
     )
     return await context.runtime.async_run(spec, lambda: _identify(interval, context, candidate))
 
@@ -62,18 +69,25 @@ async def _identify(interval: dict, context: PipelineContext, candidate) -> dict
         result = await asyncio.to_thread(context.runtime.run, text_spec, lambda: _text_title(recognition, context))
         text_review, (title, artist, status) = result
     audio_review = None
-    if context.services.needs_audio(recognition, status):
-        spec = context.spec("audio-title/" + fingerprint(interval), "音频标题复核", recognition)
+    required_audio = context.services.needs_audio(recognition, status)
+    if required_audio or context.options["use_title_model"]:
+        spec = context.spec(
+            "audio-title/" + fingerprint(interval), "音频标题复核", [TITLE_PIPELINE_VERSION, recognition]
+        )
         result = await asyncio.to_thread(
             context.runtime.run, spec, lambda: context.services.audio_title(interval, recognition, context)
         )
-        title, artist, status = result["title"], result["artist"], result["status"]
+        if required_audio or result["status"] == "audio_verified":
+            title, artist, status = result["title"], result["artist"], result["status"]
         audio_review = result["audio_review"]
+    qq_spec = context.spec("qqmusic/" + fingerprint(interval), "QQ 音乐歌词核对", audio_review)
+    verification = await context.runtime.async_run(qq_spec, lambda: context.services.verify_qqmusic(audio_review))
+    title, artist, status = apply_verification((title, artist, status), verification)
     return {
         "recognition": recognition,
         "title": title or "",
         "artist": artist or "",
-        "title_resolution": {"status": status, "text": text_review, "audio": audio_review},
+        "title_resolution": {"status": status, "text": text_review, "audio": audio_review, "qqmusic": verification},
     }
 
 

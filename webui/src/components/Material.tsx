@@ -96,14 +96,19 @@ export function Slider({ label, onChange, step = 1, ...props }: SliderProps) {
     onInput: (event: Event) => onChange((event.target as HTMLElement & { value: number }).value),
   });
 }
-export function MaterialDialog({ open, title, children, onClose }: { open: boolean; title: string; children: ReactNode; onClose: () => void }) {
+export function MaterialDialog({ open, title, children, onClose, dismissible = true }: {
+  open: boolean; title: string; children: ReactNode; onClose: () => void; dismissible?: boolean;
+}) {
   const reduced = useReducedMotion();
   const ref = useRef<HTMLElement & { open: boolean; show: () => Promise<void>; close: () => Promise<void> }>(null);
   useEffect(() => {
     if (open && !ref.current?.open) void ref.current?.show();
     if (!open && ref.current?.open) void ref.current?.close();
   }, [open]);
-  return createElement('md-dialog', { ref, oncancel: onClose, onclosed: onClose,
+  return createElement('md-dialog', { ref, oncancel: (event: Event) => {
+    if (dismissible) onClose();
+    else event.preventDefault();
+  }, onclosed: onClose,
     getOpenAnimation: () => dialogAnimation({ opening: true, reduced }),
     getCloseAnimation: () => dialogAnimation({ opening: false, reduced }),
   },

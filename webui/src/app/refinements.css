@@ -11,7 +11,7 @@ form.download-panel > .pane-footer > .btn { width: 100%; }
 .clip-editor .field-grid { margin: 0; }
 .clip-evidence { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
 .manifest-json { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 55dvh; overflow: auto; font-size: 12px; }
-.step-head > strong, .step-meta, .step > .muted, .list-item-supporting-text, .file-description > span, .upload-step { font-size: 13px; }
+.list-item-supporting-text, .file-description > span { font-size: 13px; }
 .log { font-size: 13px; }
 .skip-link { position: fixed; top: 8px; left: 8px; transform: translateY(-160%); z-index: 100; padding: 12px 20px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border-radius: 12px; }
 .skip-link:focus { transform: none; }
@@ -22,6 +22,5 @@ h1, h2, h3 { text-wrap: balance; }
 .task-options > div { display: flex; justify-content: space-between; gap: 12px; }
 .task-sources { padding-left: 20px; overflow-wrap: anywhere; }
 .source-url { overflow-wrap: anywhere; font-size: 12px; }
-.single-video-summary { margin-block: 12px; overflow-wrap: anywhere; }
 .clip-editor input { display: block; width: 100%; color: inherit; background: var(--md-sys-color-surface-container-low); border: 1px solid var(--md-sys-color-outline); border-radius: 8px; padding: 12px; }
 .clip-actions { margin-block: 12px; }

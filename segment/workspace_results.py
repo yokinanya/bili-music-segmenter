@@ -37,7 +37,7 @@ def _clip(item: dict, interval: dict, manifest: dict) -> dict:
     return {
         "id": interval.get("clip_id", hashlib.sha256(str(path).encode()).hexdigest()),
         "media_id": item["id"],
-        "name": path.name,
+        "name": interval.get("download_name", path.name),
         "path": str(path),
         "title": interval.get("title", ""),
         "artist": interval.get("artist", ""),

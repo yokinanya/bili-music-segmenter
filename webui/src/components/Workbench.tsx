@@ -46,6 +46,7 @@ function TaskActions({ state }: { state: WorkspaceState }) {
   const job = state.current.job!;
   if (isActive(job.state)) return <Button variant='outlined' onClick={() => void state.action(() => api.stop(job.id))}><Icon name='stop' />停止任务</Button>;
   return <>
+    {job.can_complete_parts && <Button variant='filled' onClick={() => void state.action(() => api.retry(job.id))}>补齐分 P</Button>}
     {['failed', 'cancelled', 'interrupted'].includes(job.state) && <Button variant='filled' onClick={() => void state.action(() => api.retry(job.id))}>续跑</Button>}
     <Button disabled={job.batch.some((item) => item.can_reuse === false)} onClick={() => void state.action(() => state.rerun(job))}>{job.batch.some((item) => item.source_type === 'download') ? '复用视频重新分析' : '重新处理'}</Button>
     {job.batch.some((item) => item.source_url) && <Button onClick={() => void state.action(async () => state.redownload(job))}>重新下载原链接</Button>}

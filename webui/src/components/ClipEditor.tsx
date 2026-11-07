@@ -1,38 +1,43 @@
 'use client';
 import { useRef, useState } from 'react';
-import type { Clip } from '@/lib/types';
+import type { Clip, ClipEditProgress as EditProgress } from '@/lib/types';
 import { api } from '@/lib/api';
 import { errorText } from '@/lib/format';
 import { Button, MaterialDialog, TextField } from './Material';
+import { ClipEditProgress } from './ClipEditProgress';
 
 interface Props { jobId: string; clip: Clip; onClose: () => void; onSaved: () => void }
 export function ClipEditor({ jobId, clip, onClose, onSaved }: Props) {
   const [title, setTitle] = useState(clip.title), [artist, setArtist] = useState(clip.artist);
   const [start, setStart] = useState(String(clip.start_seconds)), [end, setEnd] = useState(String(clip.end_seconds));
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [progress, setProgress] = useState<EditProgress>({ stage: 'preparing', completed_seconds: 0, total_seconds: null, elapsed_seconds: 0 });
+  const changesBounds = Number(start) !== clip.start_seconds || Number(end) !== clip.end_seconds;
   const form = useRef<HTMLFormElement>(null);
   const save = async () => {
     if (!form.current?.reportValidity() || busy) return;
     const start_seconds = Number(start), end_seconds = Number(end);
     if (end_seconds <= start_seconds) { setError('结束时间必须晚于开始时间'); return; }
     setBusy(true); setError('');
+    setProgress({ stage: 'preparing', completed_seconds: 0, total_seconds: null, elapsed_seconds: 0 });
     try {
-      await api.editClip(jobId, clip.id, { title, artist, start_seconds, end_seconds });
+      await api.editClip(jobId, clip.id, { data: { title, artist, start_seconds, end_seconds }, update: setProgress });
       onSaved(); onClose();
     } catch (cause) { setError(errorText(cause)); }
     finally { setBusy(false); }
   };
-  return <MaterialDialog open title="复核片段并重新导出" onClose={() => { if (!busy) onClose(); }}>
+  return <MaterialDialog open title="编辑片段" dismissible={!busy} onClose={() => { if (!busy) onClose(); }}>
     <form ref={form} className="clip-editor" onSubmit={(event) => { event.preventDefault(); void save(); }}>
-      <p className="helper">时间以原视频为基准，单位为秒。保存后使用原视频重新导出，不调用识曲或模型。失败时保留原片段。</p>
+      <p className="helper">时间以原视频为基准，单位为秒。仅修改歌名或歌手时直接保存，修改时间范围后重新导出。</p>
       <TextField label="歌曲标题" value={title} onChange={setTitle} disabled={busy} />
       <TextField label="歌手" value={artist} onChange={setArtist} disabled={busy} />
       <div className="field-grid">
         <label>开始时间 / 秒<input type="number" required min="0" step="0.001" value={start} disabled={busy} onChange={(event) => setStart(event.target.value)} /></label>
         <label>结束时间 / 秒<input type="number" required min="0" step="0.001" value={end} disabled={busy} onChange={(event) => setEnd(event.target.value)} /></label>
       </div>
+      {busy && <ClipEditProgress progress={progress} />}
       {error && <div className="error" role="alert">{error}</div>}
-      <div className="dialog-actions"><Button disabled={busy} onClick={onClose}>取消</Button><Button variant="filled" disabled={busy} onClick={() => void save()}>{busy ? '正在重新导出…' : '保存并重新导出'}</Button></div>
+      <div className="dialog-actions"><Button disabled={busy} onClick={onClose}>取消</Button><Button variant="filled" disabled={busy} onClick={() => void save()}>{busy ? '正在保存…' : changesBounds ? '保存并重新导出' : '保存修改'}</Button></div>
     </form>
   </MaterialDialog>;
 }

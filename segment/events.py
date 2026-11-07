@@ -11,11 +11,12 @@ Tests that only need structured events may point ``EVENTS_ENV`` at an ordinary d
 
 import json
 import os
-from threading import Lock
+from threading import RLock
 
 EVENTS_ENV = "MUSIC_AGENT_EVENTS_FD"
 HANDLE_ENV = "MUSIC_AGENT_EVENTS_HANDLE"
-_EVENT_LOCK = Lock()
+# Descriptor initialization re-enters this lock while an event write is serialized.
+_EVENT_LOCK = RLock()
 _private_fds: set[int] = set()
 _child_handle: int | None = None
 

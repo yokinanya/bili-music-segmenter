@@ -22,10 +22,15 @@ export interface BatchItem {
 }
 export interface Clip { id: string; media_id: string; name: string; title: string; artist: string; duration_seconds: number; start_seconds: number; end_seconds: number; source_name: string; recognition?: unknown; title_resolution?: unknown }
 export interface ClipEdit { title: string; artist: string; start_seconds: number; end_seconds: number }
+export interface ClipEditProgress {
+  stage: 'preparing' | 'encoding' | 'saving';
+  completed_seconds: number; total_seconds: number | null; elapsed_seconds: number;
+}
 export interface ModelUsage { model: string; calls: number; missing_usage: number; input_tokens: number; output_tokens: number; cached_tokens: number; estimated_cny: number | null }
 export interface UsageSnapshot { models: ModelUsage[]; calls: number; input_tokens: number; output_tokens: number; cached_tokens: number; estimated_cny: number; complete: boolean }
 export interface JobAttempt { number: number; state: JobState; started_at: string; finished_at: string; usage: UsageSnapshot }
 export interface JobStatus {
+  can_complete_parts?: boolean;
   id: string; state: JobState; attempt: number; attempts: JobAttempt[]; batch: BatchItem[];
   current_index: number | null; clips: Clip[]; usage: UsageSnapshot; options: RunOptions; upload_ids: string[];
   started_at: string; finished_at: string | null; error: string | null; cleanup_error: string | null;

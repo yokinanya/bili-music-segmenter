@@ -7,6 +7,7 @@ import math
 from dataclasses import asdict
 from pathlib import Path
 
+from segment.music_agent.clip_tails import extend_clip_tails
 from segment.music_agent.detection import Candidate
 from segment.music_agent.export_inventory import initialize_inventory, remove_superseded_exports
 from segment.music_agent.final_review import apply_recheck, request_audit
@@ -74,6 +75,7 @@ async def _finalize(ordered: list, requests: list, context: PipelineContext):
         context.spec("overlap-review", "跨候选联合复核", reviewed),
         lambda: reconcile_overlaps(reviewed, context),
     )
+    resolved = extend_clip_tails(resolved, context.runtime.config["duration"])
     records = {record["index"]: record for record in resolved}
     yield list(records.values())
     async for original, result in _parallel(resolved, lambda item: _export_record(item, context), context):

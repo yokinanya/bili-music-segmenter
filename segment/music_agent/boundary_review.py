@@ -18,6 +18,9 @@ GROUPING_PROMPT = """\n本次是完整单曲边界复核，必须额外返回 so
 intervals 按时间顺序列出演唱区间；song_groups 每项为属于同一次完整歌曲表演的 intervals 零起始编号数组。
 仅有声学证据证明中间为同曲间奏、换气、短暂插话时将区间分到同组；换歌或独立聊天必须分组。
 例如同曲三段返回 song_groups=[[0,1,2]]，不同歌曲返回 [[0],[1]]；每个区间必须恰好出现一次。
+编号从 0 开始，最大为 intervals.length-1。组内及各组之间均按时间排列，每组只能包含连续编号。
+将 song_groups 从左到右展开后，必须严格等于 [0,1,...,intervals.length-1]，不得漏号、重复、倒序或越界。
+intervals 有三项时，[[0,1],[2]] 有效；[[0,2],[1]]、[[0,1],[1,2]]、[[1,2,3]] 均无效。
 同组首尾应包含已确认的前奏尾奏。音乐在输入开头已存在且真实前奏未找到时 clipped_start=true；
 音乐在输入结束仍继续且真实尾奏未找到时 clipped_end=true，否则 false。不能把未知当作边界已确认。
 """
@@ -89,7 +92,7 @@ def _parse_intervals(data: dict, duration: float, confidence_threshold: float) -
                 f"要求 0 <= start_seconds < end_seconds <= {duration:.6f}"
             )
         if intervals and start < intervals[-1][1]:
-            raise ValueError("模型演唱区间必须按时间排序且不重叠")
+            raise InvalidBoundary("模型演唱区间必须按时间排序且不重叠")
         intervals.append((start, end))
     return intervals
 
@@ -101,12 +104,16 @@ def _group_intervals(intervals: list[tuple[float, float]], data: dict) -> list[t
     if groups is None:
         if len(intervals) == 1:
             return intervals
-        raise ValueError("多个演唱区间缺少 song_groups，无法确定同曲间奏，不自动拆段")
+        raise InvalidBoundary("多个演唱区间缺少 song_groups，请根据音频明确分组，每个区间必须恰好出现一次")
     if not isinstance(groups, list) or any(not isinstance(group, list) or not group for group in groups):
-        raise ValueError("song_groups 格式无效")
+        raise InvalidBoundary(f"song_groups 格式无效，必须是由非空整数编号数组组成的数组，实际为 {groups!r}")
     indices = [index for group in groups for index in group]
-    if any(type(index) is not int for index in indices) or indices != list(range(len(intervals))):
-        raise ValueError("song_groups 必须按时间连续覆盖每个区间且不得重复")
+    expected = list(range(len(intervals)))
+    if any(type(index) is not int for index in indices) or indices != expected:
+        raise InvalidBoundary(
+            f"song_groups 必须按时间连续覆盖每个区间且不得重复；"
+            f"编号必须为整数，按组展开后应为 {expected!r}，实际为 {indices!r}"
+        )
     return [(intervals[group[0]][0], intervals[group[-1]][1]) for group in groups]
 
 

@@ -46,8 +46,10 @@ export function DownloadPanel(props: DownloadPanelProps) {
           <input hidden ref={cookieFile} type="file" accept=".txt" disabled={busy} onChange={(event) => {
             const file = event.target.files?.[0]; event.target.value = ''; void importCookie(file);
           }} />
-          <Button type="button" variant="outlined" disabled={busy} onClick={() => cookieFile.current?.click()}><Icon name="upload" />导入 cookies.txt</Button>
-          <Button type="button" variant="text" disabled={busy || !cookie} onClick={() => setCookie('')}>清空 Cookie</Button>
+          <div className="cookie-actions">
+            <Button type="button" variant="outlined" disabled={busy} onClick={() => cookieFile.current?.click()}><Icon name="upload" />导入 cookies.txt</Button>
+            <Button type="button" variant="text" disabled={busy || !cookie} onClick={() => setCookie('')}>清空 Cookie</Button>
+          </div>
           <p className="helper">Cookie 随源文件保留以便续跑，删除任务时清理。浏览器不保存 Cookie。</p>
         </Disclosure>
       </section>

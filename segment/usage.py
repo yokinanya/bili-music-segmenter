@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 from threading import Lock
 
 from segment.events import emit_event
 
 EVENT_PREFIX = "__MUSIC_AGENT_USAGE__"
+LOGGER = logging.getLogger(__name__)
 MILLION = Decimal(1_000_000)
 PRICES = {
     "qwen3.8-flash": (Decimal("0.8"), Decimal("0.1"), Decimal("2.7")),
@@ -29,18 +31,26 @@ def _tokens(usage: dict) -> tuple[int, int, int]:
     return prompt, completion, cached
 
 
+def _validated_event(event: dict) -> dict:
+    try:
+        if event["usage"] is not None:
+            _tokens(event["usage"])
+    except ValueError:
+        LOGGER.warning("已忽略模型 %s 的无效 usage token 统计", event["model"])
+        return {**event, "usage": None}
+    return event
+
+
 class UsageTotals:
     def __init__(self) -> None:
         self._lock = Lock()
         self._events: list[dict] = []
 
-    def add(self, event: dict) -> None:
-        # Validate inside the lock so a failing event never interleaves with a concurrent snapshot.
+    def add(self, event: dict) -> dict:
+        validated = _validated_event(event)
         with self._lock:
-            usage = event["usage"]
-            if usage is not None:
-                _tokens(usage)
-            self._events.append(event)
+            self._events.append(validated)
+        return validated
 
     def snapshot(self) -> dict:
         with self._lock:

@@ -12,6 +12,7 @@ from segment.music_agent.media import media_duration
 from segment.music_agent.runtime import fingerprint
 from segment.workspace_downloads import register_download, validate_download
 from segment.workspace_options import default_options, validate_options
+from segment.workspace_parts import can_complete_parts, is_bilibili_video
 from segment.workspace_records import ACTIVE_STATES, end_steps, new_job
 from segment.workspace_result_edit import edit_result, manifest_path
 from segment.workspace_results import history_entry, make_archive, read_clips
@@ -35,6 +36,7 @@ class Jobs:
             "save": lambda job: self.store.put("jobs", job),
         }
         self._lock = RLock()
+        self._job_locks = {}
         self._reconcile()
         legacy = services.get("legacy_path")
         if legacy and legacy.exists():
@@ -90,7 +92,9 @@ class Jobs:
                     if previous.get("remote_fingerprint") != stamp:
                         raise ValueError("同一请求 ID 对应的下载参数不一致")
                     return previous["id"]
-            upload = register_download(self.root, self.store, url=url, cookie=cookie)
+            upload = register_download(
+                self.root, self.store, url=url, cookie=cookie, resolve_parts=is_bilibili_video(url)
+            )
             job = {**new_job([upload], options, request, self.root), "remote_fingerprint": stamp}
             self.store.put("jobs", job)
             self.execution.schedule(job["id"])
@@ -133,18 +137,27 @@ class Jobs:
         job = self.store.get("jobs", identity)
         return {
             **job,
+            "can_complete_parts": can_complete_parts(job, self.store),
             "batch": [self._public_item(item) for item in job["batch"]],
             "clips": [clip for item in job["batch"] for clip in read_clips(item)],
         }
 
-    def manifest(self, identity: str, media_id: str) -> Path:
+    def _job_lock(self, identity: str):
         with self._lock:
+            return self._job_locks.setdefault(identity, RLock())
+
+    def manifest(self, identity: str, media_id: str) -> Path:
+        with self._job_lock(identity):
             return manifest_path(self.store.get("jobs", identity), media_id)
 
-    def edit_clip(self, identity: str, clip_id: str, payload: dict) -> dict:
-        with self._lock:
+    def edit_clip(self, identity: str, clip_id: str, payload: dict, *, progress=None) -> dict:
+        if progress:
+            progress({"stage": "preparing", "completed_seconds": 0, "total_seconds": None})
+        with self._job_lock(identity):
             return edit_result(
-                self.store.get("jobs", identity), {"clip_id": clip_id, "payload": payload}, self.result_services
+                self.store.get("jobs", identity),
+                {"clip_id": clip_id, "payload": payload},
+                {**self.result_services, "progress": progress},
             )
 
     def history(self) -> list[dict]:
@@ -152,16 +165,26 @@ class Jobs:
         return sorted([*self.store.list("legacy"), *current], key=lambda item: item["started_at"], reverse=True)
 
     def retry(self, identity: str) -> str:
-        with self._lock:
+        with self._job_lock(identity), self._lock:
             job = self.store.get("jobs", identity)
-            if job["state"] in ACTIVE_STATES or job["state"] in {"succeeded", "cleanup_pending"}:
+            complete_parts = can_complete_parts(job, self.store)
+            if job["state"] in ACTIVE_STATES or job["state"] == "cleanup_pending":
+                raise ValueError("当前任务不能续跑")
+            if job["state"] == "succeeded" and not complete_parts:
                 raise ValueError("当前任务不能续跑")
             for upload in job["upload_ids"]:
                 if self.store.get("uploads", upload).get("kind") != "download":
                     self._ready(upload)
             items = [
-                {**item, "last_sequence": 0, "state": "queued", "error": None, "steps": []}
-                if item["state"] != "succeeded"
+                {
+                    **item,
+                    "last_sequence": 0,
+                    "state": "queued",
+                    "error": None,
+                    "steps": [],
+                    **({"discover_only": True} if complete_parts else {}),
+                }
+                if item["state"] != "succeeded" or complete_parts
                 else item
                 for item in job["batch"]
             ]
@@ -206,20 +229,23 @@ class Jobs:
                 raise
             return data[: error.start].decode("utf-8")
 
-    def clip_path(self, identity: str, clip_id: str) -> Path:
+    def clip_info(self, identity: str, clip_id: str) -> dict:
         for clip in self.status(identity)["clips"]:
             if clip["id"] == clip_id:
                 path = Path(clip["path"])
                 if path.is_file():
-                    return path
+                    return clip
         raise KeyError(clip_id)
 
+    def clip_path(self, identity: str, clip_id: str) -> Path:
+        return Path(self.clip_info(identity, clip_id)["path"])
+
     def archive(self, identity: str) -> Path:
-        with self._lock:
+        with self._job_lock(identity):
             return make_archive(self.status(identity), self.root / "jobs" / identity)
 
     def delete(self, identity: str) -> None:
-        with self._lock:
+        with self._job_lock(identity), self._lock:
             job = self.store.get("jobs", identity)
             if job["state"] in ACTIVE_STATES:
                 raise ValueError("请先停止任务再删除")

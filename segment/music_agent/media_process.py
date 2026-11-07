@@ -4,17 +4,30 @@ from __future__ import annotations
 
 import subprocess
 import time
-from contextlib import nullcontext
+from collections.abc import Callable
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 
 from segment.music_agent.runtime import CURRENT, PROGRESS_INTERVAL_SECONDS, fingerprint
 
 MICROSECONDS_PER_SECOND = 1_000_000
+AUTOMATIC_THREADS = 0
+MEDIA_PROGRESS: ContextVar[Callable | None] = ContextVar("media_progress", default=None)
+
+
+@contextmanager
+def reporting_media(progress: Callable):
+    token = MEDIA_PROGRESS.set(progress)
+    try:
+        yield
+    finally:
+        MEDIA_PROGRESS.reset(token)
 
 
 def execute_media(command: list[str], duration: float) -> None:
     scope = CURRENT.get()
     budget = scope.runtime.resource("media") if scope else nullcontext()
-    threads = scope.runtime.config["media_threads"] if scope else 1
+    threads = scope.runtime.config["media_threads"] if scope else AUTOMATIC_THREADS
     invocation = [command[0], "-progress", "pipe:1", "-nostats", "-threads", str(threads), *command[1:]]
     # FFmpeg's output codec also needs an explicit thread budget.
     invocation[-1:-1] = ["-threads", str(threads)]
@@ -30,7 +43,9 @@ def _read_progress(process, duration: float, command: list[str]) -> None:
     reader = Thread(target=lambda: errors.extend(process.stderr.readlines()))
     reader.start()
     last = 0.0
+    started = time.monotonic()
     scope = CURRENT.get()
+    progress = MEDIA_PROGRESS.get()
     identity = "media/" + fingerprint(command)
     label = "导出片段" if "libx264" in command else "提取音频"
     for line in process.stdout:
@@ -38,14 +53,19 @@ def _read_progress(process, duration: float, command: list[str]) -> None:
         if key != "out_time_us" or value == "N/A":
             continue
         elapsed = time.monotonic()
-        if scope and elapsed - last >= PROGRESS_INTERVAL_SECONDS:
-            scope.runtime.event(
-                identity,
-                label,
-                completed=min(duration, max(0, int(value) / MICROSECONDS_PER_SECOND)),
-                total=duration,
-                unit="秒",
-            )
+        if elapsed - last >= PROGRESS_INTERVAL_SECONDS:
+            completed = min(duration, max(0, int(value) / MICROSECONDS_PER_SECOND))
+            if progress:
+                progress(
+                    {
+                        "stage": "encoding",
+                        "completed_seconds": completed,
+                        "total_seconds": duration,
+                        "elapsed_seconds": elapsed - started,
+                    }
+                )
+            if scope:
+                scope.runtime.event(identity, label, completed=completed, total=duration, unit="秒")
             last = elapsed
     returncode = process.wait()
     reader.join()

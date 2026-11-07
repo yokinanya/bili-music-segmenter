@@ -58,7 +58,7 @@ def test_exact_duplicate_exports_one_physical_file(tmp_path):
 
     result = asyncio.run(execute())
     assert len(list(tmp_path.rglob("*.mp4"))) == 1
-    assert exports == [(507, 727)]
+    assert exports == [(507, 729)]
     assert sum(len(item["singing_intervals"]) for item in result) == 1
     refine.assert_not_called()
 
@@ -78,7 +78,8 @@ def test_contained_candidates_joint_review_before_export(tmp_path, monkeypatch):
 
     result = asyncio.run(execute())
     assert refine.call_count == 1
-    assert exports == [(2211, 2416)]
+    assert exports == [(2211, 2418)]
+    assert result[0]["singing_intervals"][0]["tail_extension"]["original_end_seconds"] == 2416
     assert len(list(tmp_path.rglob("*.mp4"))) == 1
     assert result[1]["decision"] == "deduplicated"
 

@@ -9,11 +9,13 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from segment.music_agent.boundary_response import InvalidBoundary, checked_boundary
 from segment.music_agent.boundary_review import GROUPING_PROMPT, BoundaryOptions, review_boundaries
 from segment.music_agent.media import make_windows, media_duration
 from segment.music_agent.models import call_with_storage
-from segment.music_agent.prompts import BOUNDARY_PROMPT, SCAN_PROMPT
+from segment.music_agent.prompts import BOUNDARY_PROMPT
 from segment.music_agent.runtime import CURRENT
+from segment.music_agent.scan_response import scan_prompt, scan_times
 from segment.music_agent.scan_workers import scan_windows
 from segment.music_agent.storage import AudioStorage
 
@@ -33,25 +35,24 @@ class Candidate:
     rationale: str
 
 
-def parse_candidates(data: dict[str, Any], absolute_offset: float) -> list[Candidate]:
+def parse_candidates(
+    data: dict[str, Any], absolute_offset: float, *, audio_duration: float | None = None
+) -> list[Candidate]:
     segments = data.get("segments")
     if not isinstance(segments, list):
         raise ValueError("模型扫描结果缺少 segments 数组")
     candidates = []
     for item in segments:
         classification = item.get("classification")
-        start = absolute_offset + float(item["start_seconds"])
-        end = absolute_offset + float(item["end_seconds"])
+        relative_start, relative_end = scan_times(item, audio_duration)
+        start, end = absolute_offset + relative_start, absolute_offset + relative_end
+        if not all(math.isfinite(value) for value in (start, end)) or end <= start:
+            raise InvalidBoundary(f"无效候选时间：{start}-{end}")
         confidence = float(item["confidence"])
         if classification not in VALID_CLASSES:
             raise ValueError(f"无效歌曲分类：{classification}")
-        if (
-            not all(math.isfinite(x) for x in (start, end, confidence))
-            or start < absolute_offset
-            or end <= start
-            or not 0 <= confidence <= 1
-        ):
-            raise ValueError(f"无效候选时间：{start}-{end}")
+        if not math.isfinite(confidence) or not 0 <= confidence <= 1:
+            raise ValueError(f"无效候选置信度：{confidence}")
         candidates.append(
             Candidate(
                 index=0,
@@ -150,7 +151,11 @@ def _scan_window(context: ScanContext, item: tuple) -> tuple[list[Candidate], di
     index, window = item
     scope = CURRENT.get()
     if scope:
-        spec = {"id": f"scan/{index}", "label": f"扫描分块 {index}", "input": [window, context.model, SCAN_PROMPT]}
+        spec = {
+            "id": f"scan/{index}",
+            "label": f"扫描分块 {index}",
+            "input": [window, context.model, scan_prompt(window)],
+        }
         result = scope.runtime.run(spec, lambda: _scan_chunk(context, item))
         scope.runtime.advance("scan", "分块扫描", scope.runtime.config["scan_total"])
     else:
@@ -160,23 +165,8 @@ def _scan_window(context: ScanContext, item: tuple) -> tuple[list[Candidate], di
 
 def _scan_chunk(context: ScanContext, item: tuple) -> dict:
     index, (core_start, core_end, audio_start, audio_end) = item
-    response = call_with_storage(
-        context.media,
-        audio_start,
-        audio_end,
-        context.client,
-        context.storage,
-        model=context.model,
-        prompt=SCAN_PROMPT,
-        s3_prefix=context.prefix,
-    )
-    current = [
-        candidate
-        for candidate in parse_candidates(response["data"], audio_start)
-        if candidate.end > core_start and candidate.start < core_end
-    ]
-    if any(candidate.end > audio_end for candidate in current):
-        raise ValueError("扫描候选超出输入音频范围")
+    response, candidates = _scan_response(context, item[1])
+    current = [candidate for candidate in candidates if candidate.end > core_start and candidate.start < core_end]
     return {
         "candidates": [asdict(candidate) for candidate in current],
         "metadata": {
@@ -187,8 +177,32 @@ def _scan_chunk(context: ScanContext, item: tuple) -> dict:
             "audio_end": audio_end,
             "candidate_count": len(current),
             "usage": response["usage"],
+            "boundary_corrections": response.get("boundary_corrections", []),
         },
     }
+
+
+def _scan_response(context: ScanContext, window: tuple) -> list:
+    _, _, audio_start, audio_end = window
+    prompt = scan_prompt(window)
+
+    def request(start: float, end: float, *, correction: str = "") -> dict:
+        return call_with_storage(
+            context.media,
+            start,
+            end,
+            context.client,
+            context.storage,
+            model=context.model,
+            prompt=prompt + (f"\n时间校验纠正要求：{correction}" if correction else ""),
+            s3_prefix=context.prefix,
+        )
+
+    def validate(response: dict) -> list:
+        candidates = parse_candidates(response["data"], audio_start, audio_duration=audio_end - audio_start)
+        return [response, candidates]
+
+    return checked_boundary(request, {"start": audio_start, "end": audio_end}, validate)
 
 
 def refine_candidate(
@@ -219,7 +233,7 @@ def refine_candidate(
         if review_instruction:
             prompt += f"\n待核实疑点（仅为线索）：{review_instruction}"
         if correction:
-            prompt += f"\n时间校验纠正要求：{correction}"
+            prompt += f"\n边界与分组纠正要求：{correction}"
         return call_with_storage(
             media,
             audio_start,

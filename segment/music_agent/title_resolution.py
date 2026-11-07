@@ -14,6 +14,8 @@ TITLE_AUDIO_PROMPT = """辨别当前现场演唱的作品及语言版本，不�
 听取实际歌词语言、清晰歌词片段与报幕，对照识曲候选；原曲与中文填词版必须按演唱歌词选择。
 优先已知的简体中文正式歌名/艺人名。允许提供可靠的官方中文别名，但不可自行翻译、拼音回译或猜造。
 若原名本来是英文且没有可靠中文正式名称，保留原名。证据不足返回 unresolved，不仅因中文优先而选择中文候选。
+即使 choice 为 unresolved，也应返回可清晰听到的一句连续歌词 lyrics_evidence 和实听置信度。
+不得把参考数据中的歌词当成实听证据，不确定时 lyrics_evidence 留空。
 只输出 JSON：{"choice":"shazam|netease|unresolved","confidence":0.0,
 "language":"演唱语言或unknown","lyrics_evidence":"可明确听出的短歌词，不确定留空",
 "display_title":"确认的正式中文名或候选原名","display_artist":"确认的中文艺人名或候选原名",

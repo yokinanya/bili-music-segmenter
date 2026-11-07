@@ -113,12 +113,12 @@ def test_active_and_missing_source_are_explicit_errors(jobs, result):
     identity, clip, _ = result
     jobs.store.update("jobs", identity, lambda job: {**job, "state": "running"})
     with pytest.raises(ValueError, match="运行中"):
-        jobs.edit_clip(identity, clip["id"], {"title": "edit"})
+        jobs.edit_clip(identity, clip["id"], {"title": "edit", "start_seconds": 2})
     jobs.store.update("jobs", identity, lambda job: {**job, "state": "succeeded"})
     Path(jobs.status(identity)["batch"][0]["source_path"]).unlink()
     assert jobs.status(identity)["batch"][0]["can_reuse"] is False
     with pytest.raises(FileNotFoundError, match="源文件"):
-        jobs.edit_clip(identity, clip["id"], {"title": "edit"})
+        jobs.edit_clip(identity, clip["id"], {"title": "edit", "start_seconds": 2})
 
 
 def test_failed_export_preserves_manifest_clip_and_job(jobs, result):
@@ -131,7 +131,7 @@ def test_failed_export_preserves_manifest_clip_and_job(jobs, result):
 
     jobs.result_services["export"] = failed
     with pytest.raises(RuntimeError, match="ffmpeg failed"):
-        jobs.edit_clip(identity, clip["id"], {"title": "edit"})
+        jobs.edit_clip(identity, clip["id"], {"title": "edit", "start_seconds": 2})
     assert (manifest.read_bytes(), jobs.store.get("jobs", identity)) == before
     assert Path(clip["path"]).read_bytes() == b"original"
     assert not list(manifest.parent.glob("revision_*.mp4"))
@@ -151,7 +151,7 @@ def test_edit_serializes_retry_and_delete(jobs, result, operation):
 
     def edit():
         try:
-            jobs.edit_clip(identity, clip["id"], {"title": "edit"})
+            jobs.edit_clip(identity, clip["id"], {"title": "edit", "start_seconds": 2})
         except Exception as error:
             errors.append(error)
 
@@ -191,7 +191,7 @@ def test_failed_persistence_rolls_back_manifest_and_revision(jobs, result):
     before = json.loads(manifest.read_text(encoding="utf-8"))
     jobs.result_services["save"] = Mock(side_effect=RuntimeError("database failed"))
     with pytest.raises(RuntimeError, match="database failed"):
-        jobs.edit_clip(identity, clip["id"], {"title": "edit"})
+        jobs.edit_clip(identity, clip["id"], {"title": "edit", "start_seconds": 2})
     assert json.loads(manifest.read_text(encoding="utf-8")) == before
     assert Path(clip["path"]).read_bytes() == b"original"
     assert not list(manifest.parent.glob("revision_*.mp4"))
@@ -203,7 +203,7 @@ def test_http_edit_errors_are_visible(server, jobs, result):
     assert request(server, "PUT", route, data={"end_seconds": 99})[0] == 400
     assert request(server, "PUT", f"/api/jobs/{identity}/clip/missing", data={"title": "edit"})[0] == 404
     jobs.result_services["export"] = Mock(side_effect=RuntimeError("ffmpeg failed"))
-    status, body, _ = request(server, "PUT", route, data={"title": "edit"})
+    status, body, _ = request(server, "PUT", route, data={"title": "edit", "start_seconds": 2})
     assert status == 500 and "ffmpeg failed" in json.loads(body)["error"]
 
 
@@ -215,7 +215,7 @@ def test_rejects_source_path_escape(jobs, result):
         lambda job: {**job, "batch": [{**job["batch"][0], "source_path": str(jobs.root / "outside.mp4")}]},
     )
     with pytest.raises(ValueError, match="超出"):
-        jobs.edit_clip(identity, clip["id"], {"title": "edit"})
+        jobs.edit_clip(identity, clip["id"], {"title": "edit", "start_seconds": 2})
     jobs.result_services["export"].assert_not_called()
 
 
@@ -227,7 +227,7 @@ def test_rejects_manifest_and_clip_path_escape(jobs, result):
     with pytest.raises(ValueError, match="超出"):
         jobs.status(identity)
     with pytest.raises(ValueError, match="超出"):
-        jobs.edit_clip(identity, clip["id"], {"title": "edit"})
+        jobs.edit_clip(identity, clip["id"], {"title": "edit", "start_seconds": 2})
 
 
 def test_download_public_metadata_and_reuse(server, jobs):
@@ -288,6 +288,10 @@ def test_real_ffmpeg_reexport(jobs, result):
         timeout=15,
     )
     jobs.result_services.update({"export": export_video, "duration": media_duration})
-    revised = jobs.edit_clip(identity, clip["id"], {"start_seconds": 0.25, "end_seconds": 1.25})
+    updates = []
+    revised = jobs.edit_clip(
+        identity, clip["id"], {"start_seconds": 0.25, "end_seconds": 1.25}, progress=updates.append
+    )
+    assert any(event["stage"] == "encoding" and event["total_seconds"] == 1 for event in updates)
     assert 0.9 <= media_duration(Path(revised["path"])) <= 1.2
     assert Path(clip["path"]).read_bytes() == b"original"

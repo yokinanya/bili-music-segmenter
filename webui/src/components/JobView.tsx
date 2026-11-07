@@ -17,8 +17,7 @@ export function JobView({ job, actions, error, onRetry }: { job: JobStatus; acti
   return <><section className="panel task-main"><div className="task-scroll">
     {error && <div className="error" role="alert">{error}<Button onClick={onRetry}>重新读取</Button></div>}
     <BatchProgress job={job} selected={index} onSelect={setManual} following={manual === null} onFollow={() => setManual(null)} />
-    {job.error && <div className="error">{job.error}</div>}{job.cleanup_error && <div className="error">清理失败：{job.cleanup_error}</div>}
-    <TaskDetails job={job} /><VideoProgress item={item} jobState={job.state} /></div><div className="pane-footer task-actions">{actions}</div>
+    <VideoProgress item={item} job={job} /><TaskDetails job={job} /></div><div className="pane-footer task-actions">{actions}</div>
   </section><section className="panel output-panel"><Tabs value={tab} options={['结果', '日志']} onChange={setTab} />
     <div className={`output-body ${tab === '日志' ? 'log-body' : ''}`}>
       {tab === '结果' ? <ClipList job={job} mediaId={item.id} onChanged={onRetry} /> : <LogViewer key={`${job.id}:${index}:${job.attempt}`} jobId={job.id} index={index} />}

@@ -1,4 +1,5 @@
 import type { Bootstrap, HistoryEntry, JobStatus, LogChunk, RunOptions, SourceAsset, UsageSnapshot } from './types';
+import { readClipEdit } from './clipEditStream';
 const TOKEN_KEY = 'bms-token';
 function readToken(): string {
   const url = new URL(window.location.href);
@@ -18,7 +19,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 const post = <T>(path: string, data: unknown = {}) => request<T>(path, { method: 'POST', body: JSON.stringify(data) });
 export const api = {
-  editClip: (job: string, clip: string, data: import('./types').ClipEdit) => request<{ clip: import('./types').Clip }>(`/api/jobs/${job}/clip/${clip}`, { method: 'PUT', body: JSON.stringify(data) }),
+  editClip: async (job: string, clip: string, options: {
+    data: import('./types').ClipEdit; update: (value: import('./types').ClipEditProgress) => void;
+  }) => readClipEdit(await fetch(`/api/jobs/${job}/clip/${clip}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson', 'X-WebUI-Token': token },
+    body: JSON.stringify(options.data),
+  }), options.update),
   manifest: (job: string, media: string) => request<unknown>(`/api/jobs/${job}/manifest/${media}`),
   bootstrap: () => request<Bootstrap>('/api/bootstrap'),
   uploads: () => request<{ files: SourceAsset[] }>('/api/uploads'),

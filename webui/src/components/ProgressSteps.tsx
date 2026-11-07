@@ -1,42 +1,64 @@
-import type { BatchItem, ProgressStep } from '@/lib/types';
-import { bytes } from '@/lib/format';
-import { Progress } from './Material';
+import type { BatchItem } from '@/lib/types';
+import type { ProgressIssue, StepDetail } from '@/lib/progressSummary';
+import { bytes, elapsed, progressCounter } from '@/lib/format';
 import { StateBadge } from './StateBadge';
 import { Disclosure } from './Disclosure';
 
-const completed = (state: string) => ['succeeded', 'reused', 'skipped'].includes(state);
-function completedBranch(step: ProgressStep, steps: ProgressStep[]): boolean {
-  return completed(step.state) && steps.filter((child) => child.parent_id === step.id).every((child) => completedBranch(child, steps));
+const FRACTION_DIGITS = 1;
+const UPLOAD_LABELS: Readonly<Record<string, string>> = {
+  uploading: '上传中',
+  completed: '已完成',
+  succeeded: '已完成',
+  reused: '缓存复用',
+  skipped: '已跳过',
+  failed: '失败',
+  cancelled: '已停止',
+  interrupted: '执行中断',
+};
+
+export function ProgressErrors({ issues }: { issues: readonly ProgressIssue[] }) {
+  return <div className="progress-errors">{issues.map((issue) =>
+    <div className="error progress-error" role="alert" key={issue.message}>
+      <p className="error-sources">{issue.sources.join('、')}</p>
+      <p className="error-message">{issue.message}</p>
+    </div>)}</div>;
 }
 
-export function StepGroup({ steps, allSteps }: { steps: ProgressStep[]; allSteps: ProgressStep[] }) {
-  const ended = steps.filter((step) => completedBranch(step, allSteps));
-  const visible = steps.filter((step) => !ended.includes(step));
-  return <>{visible.map((step) => <Step key={step.id} step={step} steps={allSteps} />)}
-    {ended.length > 0 && <Disclosure title={`已完成步骤 · ${ended.length}`}>
-      {ended.map((step) => <Step key={step.id} step={step} steps={allSteps} />)}
-    </Disclosure>}
-  </>;
+export function ProgressDetails({ steps, uploads }: {
+  steps: readonly StepDetail[];
+  uploads: readonly NonNullable<BatchItem['upload']>['uploads'][number][];
+}) {
+  const count = steps.length + uploads.length;
+  return <div hidden={!count}><Disclosure title={`步骤详情 · ${count}`} className="progress-details">
+    <ol className="progress-records">
+      {steps.map((detail) => <StepRecord key={detail.step.id} detail={detail} />)}
+      {uploads.map((upload) => <li className="progress-record" key={`upload:${upload.key}`}>
+        <div className="progress-record-head"><strong>S3 上传</strong>
+          <span className={`badge state-${upload.state}`}>{UPLOAD_LABELS[upload.state] ?? upload.state}</span>
+        </div>
+        <p className="muted progress-context">{upload.key}</p>
+        <p className="progress-record-meta">{bytes(upload.transferred_bytes)} / {upload.total_bytes > 0 ? bytes(upload.total_bytes) : '总量未知'}</p>
+      </li>)}
+    </ol>
+  </Disclosure></div>;
 }
-function Step({ step, steps }: { step: ProgressStep; steps: ProgressStep[] }) {
-  const children = steps.filter((item) => item.parent_id === step.id);
-  const measured = step.total !== null && step.total > 0;
-  const counter = measured ? `${Number(step.completed.toFixed(1))} / ${Number(step.total!.toFixed(1))} ${step.unit ?? ''}` : '';
-  return <div className="step"><div className="step-head"><strong>{step.label}</strong><StateBadge state={step.state} /></div>
-    {measured && <><Progress value={step.completed / step.total!} label={`${step.label} ${counter}`} /><div className="step-meta">{counter}{step.elapsed_seconds !== undefined && <span>{step.elapsed_seconds.toFixed(1)}秒</span>}</div></>}
-    {step.message && <span className="muted">{step.message}</span>}{step.error && <p className="error-text" role="alert">{step.error}</p>}
-    {children.length > 0 && <div className="child-steps"><StepGroup steps={children} allSteps={steps} /></div>}
-  </div>;
-}
-export function UploadSteps({ item }: { item: BatchItem }) {
-  const uploads = item.upload?.uploads ?? [];
-  const ended = uploads.filter((upload) => completed(upload.state) || upload.state === 'completed');
-  const visible = uploads.filter((upload) => !ended.includes(upload));
-  return <>{visible.map((upload) => <div className="upload-step" key={upload.key}>
-    <strong>S3 上传 · {upload.key}</strong><span>{upload.state}</span>
-    {upload.total_bytes > 0 && <Progress value={upload.transferred_bytes / upload.total_bytes} label="S3 上传字节进度" />}
-    <span className="muted">{bytes(upload.transferred_bytes)} / {bytes(upload.total_bytes)}</span>
-  </div>)}{ended.length > 0 && <Disclosure title={`已完成 S3 上传 · ${ended.length}`}>
-    <ul>{ended.map((upload) => <li key={upload.key}>{upload.key} · {bytes(upload.transferred_bytes)}</li>)}</ul>
-  </Disclosure>}</>;
+
+function StepRecord({ detail }: { detail: StepDetail }) {
+  const { step, context } = detail;
+  const counter = progressCounter(step);
+  const duration = step.elapsed_seconds === undefined
+    ? step.finished_at && elapsed(step.started_at, step.finished_at)
+    : `${step.elapsed_seconds.toFixed(FRACTION_DIGITS)}秒`;
+  return <li className="progress-record">
+    <div className="progress-record-head"><strong>{step.label}</strong><StateBadge state={step.state} /></div>
+    {context && <p className="muted progress-context">{context}</p>}
+    <div className="progress-record-meta">
+      {counter && <span>{counter}</span>}
+      {duration && <span>{duration}</span>}
+      {step.waiting_seconds !== undefined && step.waiting_seconds > 0 &&
+        <span>等待资源 {step.waiting_seconds.toFixed(FRACTION_DIGITS)}秒</span>}
+    </div>
+    {step.message && <p className="muted progress-message">{step.message}</p>}
+    {step.error && <p className="error-text progress-message">{step.error}</p>}
+  </li>;
 }

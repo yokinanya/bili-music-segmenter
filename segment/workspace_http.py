@@ -66,7 +66,7 @@ class WorkspaceHTTP(BaseHTTPRequestHandler):
             return
         self._serve_file(asset)
 
-    def _serve_file(self, path: Path, *, downloadable: bool = False) -> None:
+    def _serve_file(self, path: Path, *, downloadable: bool = False, filename: str | None = None) -> None:
         size = path.stat().st_size
         byte_range = parse_range(self.headers.get("Range"), size)
         if self.headers.get("Range") and byte_range is None:
@@ -82,7 +82,7 @@ class WorkspaceHTTP(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Accept-Ranges", "bytes")
         if downloadable:
-            self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(path.name)}")
+            self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(filename or path.name)}")
         if byte_range:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         self.end_headers()
