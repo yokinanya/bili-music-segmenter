@@ -9,11 +9,9 @@ from dataclasses import asdict, dataclass, fields
 
 @dataclass(frozen=True)
 class RunOptions:
-    scan_concurrency: int = 3
     candidate_concurrency: int = 3
     model_concurrency: int = 3
     recognizer_concurrency: int = 3
-    upload_concurrency: int = 2
     media_concurrency: int = min(2, os.cpu_count() or 1)
     chunk_seconds: int = 600
     chunk_context_seconds: int = 30
@@ -23,7 +21,6 @@ class RunOptions:
     minimum_confidence: float = 0.85
     use_shazam: bool = True
     use_netease: bool = True
-    use_title_model: bool = True
 
 
 ENV_NAMES = {
@@ -31,11 +28,11 @@ ENV_NAMES = {
     "boundary_context_seconds": "BOUNDARY_CONTEXT",
     "use_shazam": "SKIP_SHAZAM",
     "use_netease": "SKIP_NETEASE",
-    "use_title_model": "NO_TITLE_MODEL",
 }
 NONNEGATIVE = {"chunk_context_seconds", "boundary_context_seconds"}
-BOOLEAN_FIELDS = {"use_shazam", "use_netease", "use_title_model"}
+BOOLEAN_FIELDS = {"use_shazam", "use_netease"}
 FLOAT_FIELDS = {"minimum_candidate_seconds", "minimum_singing_seconds", "minimum_confidence"}
+RETIRED_OPTIONS = frozenset({"scan_concurrency", "upload_concurrency", "use_title_model"})
 
 
 def default_options() -> dict:

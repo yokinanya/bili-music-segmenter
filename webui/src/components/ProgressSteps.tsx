@@ -5,16 +5,6 @@ import { StateBadge } from './StateBadge';
 import { Disclosure } from './Disclosure';
 
 const FRACTION_DIGITS = 1;
-const UPLOAD_LABELS: Readonly<Record<string, string>> = {
-  uploading: '上传中',
-  completed: '已完成',
-  succeeded: '已完成',
-  reused: '缓存复用',
-  skipped: '已跳过',
-  failed: '失败',
-  cancelled: '已停止',
-  interrupted: '执行中断',
-};
 
 export function ProgressErrors({ issues }: { issues: readonly ProgressIssue[] }) {
   return <div className="progress-errors">{issues.map((issue) =>
@@ -24,21 +14,10 @@ export function ProgressErrors({ issues }: { issues: readonly ProgressIssue[] })
     </div>)}</div>;
 }
 
-export function ProgressDetails({ steps, uploads }: {
-  steps: readonly StepDetail[];
-  uploads: readonly NonNullable<BatchItem['upload']>['uploads'][number][];
-}) {
-  const count = steps.length + uploads.length;
-  return <div hidden={!count}><Disclosure title={`步骤详情 · ${count}`} className="progress-details">
+export function ProgressDetails({ steps }: { steps: readonly StepDetail[] }) {
+  return <div hidden={!steps.length}><Disclosure title={`步骤详情 · ${steps.length}`} className="progress-details">
     <ol className="progress-records">
       {steps.map((detail) => <StepRecord key={detail.step.id} detail={detail} />)}
-      {uploads.map((upload) => <li className="progress-record" key={`upload:${upload.key}`}>
-        <div className="progress-record-head"><strong>S3 上传</strong>
-          <span className={`badge state-${upload.state}`}>{UPLOAD_LABELS[upload.state] ?? upload.state}</span>
-        </div>
-        <p className="muted progress-context">{upload.key}</p>
-        <p className="progress-record-meta">{bytes(upload.transferred_bytes)} / {upload.total_bytes > 0 ? bytes(upload.total_bytes) : '总量未知'}</p>
-      </li>)}
     </ol>
   </Disclosure></div>;
 }

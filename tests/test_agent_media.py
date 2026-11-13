@@ -1,6 +1,6 @@
 import subprocess
 
-from segment.music_agent.export import export_video, make_clip_path
+from segment.music_agent.export import export_video, safe_component
 from segment.music_agent.media import extract_wav, media_duration
 
 
@@ -39,7 +39,6 @@ def test_ffmpeg_export_and_audio_extraction(tmp_path):
     assert abs(media_duration(wav) - 1.5) < 0.05
 
 
-def test_chinese_filename_keeps_title_and_stays_below_filesystem_limit(tmp_path):
-    path = make_clip_path(tmp_path, "很长的直播名字" * 30, 1, 10, 60, "歌曲标题" * 20, "歌手")
-    assert len(path.name.encode("utf-8")) <= 255
-    assert "歌曲标题" in path.name
+def test_filename_component_sanitizes_reserved_characters():
+    assert safe_component("直播/回放:?", "media") == "直播 回放"
+    assert safe_component("/", "fallback") == "fallback"

@@ -59,6 +59,6 @@ export function HistoryPanel({ onRerun, onResume, onRedownload, selectedId, onSe
     </>} />}
     {!task.job && <div className="panel history-empty empty">{task.error ? <div className="error" role="alert">{task.error}<Button onClick={task.retry}>重新读取详情</Button></div> : selected ? '正在读取…' : '选择历史任务'}</div>}
   </>}
-  <MaterialDialog open={deleting} title="删除任务与文件？" onClose={() => setDeleting(false)}><p>删除该任务的结果，并清理没有其他任务引用的源文件和 S3 缓存。此操作无法撤销。</p><div className="dialog-actions"><Button onClick={() => setDeleting(false)}>取消</Button><Button variant="filled" onClick={() => void act(async () => { await api.delete(selected!); setDeleting(false); setSelected(null); })}>确认删除</Button></div></MaterialDialog>
+  <MaterialDialog open={deleting} title="删除任务与文件？" onClose={() => setDeleting(false)}><p>删除该任务的结果，并清理没有其他任务引用的源文件和音频缓存。此操作无法撤销。</p><div className="dialog-actions"><Button onClick={() => setDeleting(false)}>取消</Button><Button variant="filled" onClick={() => void act(async () => { await api.delete(selected!); setDeleting(false); setSelected(null); })}>确认删除</Button></div></MaterialDialog>
   </div>;
 }

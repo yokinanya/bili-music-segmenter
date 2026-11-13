@@ -40,14 +40,14 @@ export function VideoProgress({ item, job }: { item: BatchItem; job: JobStatus }
     <div className="section-head"><h2>当前进度</h2><StateBadge state={summary.current?.step.state ?? summary.state} /></div>
     <CurrentProgress summary={summary} />
     {summary.unprocessed && <p className="muted progress-note">任务已结束，此视频未处理</p>}
-    {!summary.details.length && !summary.uploads.length && <p className="muted progress-note">尚无步骤记录</p>}
+    {!summary.details.length && <p className="muted progress-note">尚无步骤记录</p>}
     <ProgressErrors issues={summary.issues} />
-    <ProgressDetails steps={summary.details} uploads={summary.uploads} />
+    <ProgressDetails steps={summary.details} />
   </section>;
 }
 
 function CurrentProgress({ summary }: { summary: ReturnType<typeof summarizeProgress> }) {
-  const { current, measurement, uploading } = summary;
+  const { current, measurement } = summary;
   const parent = current?.ancestors[0];
   const currentLabel = current && [parent?.label, current.step.label].filter(Boolean).join(' · ');
   const counter = currentCounter(summary);
@@ -57,7 +57,6 @@ function CurrentProgress({ summary }: { summary: ReturnType<typeof summarizeProg
     {counter && <p className="progress-counter">{counter}</p>}
     {summary.parallelCount > 0 && <p className="muted">另有 {summary.parallelCount} 项处理中</p>}
     {current?.step.message && <p className="muted progress-message">{current.step.message}</p>}
-    <UploadSummary uploading={uploading} measurement={measurement} />
   </div>;
 }
 
@@ -66,13 +65,6 @@ function currentCounter({ measurement, current }: Pick<ReturnType<typeof summari
   if (!counterStep) return '';
   const count = progressCounter(counterStep);
   return count ? `${counterStep.label} · ${count}` : '';
-}
-
-function UploadSummary({ uploading, measurement }: Pick<ReturnType<typeof summarizeProgress>, 'uploading' | 'measurement'>) {
-  if (!uploading) return null;
-  if (measurement?.label === 'S3 上传') return <p className="muted upload-summary">正在上传 {uploading.count} 项</p>;
-  return <p className="muted upload-summary">S3 上传 {uploading.count} 项 · {bytes(uploading.completed)}
-    {uploading.total !== null ? ` / ${bytes(uploading.total)}` : ' · 总量未知'}</p>;
 }
 
 function CurrentMeasurement({ running, measurement, label }: {

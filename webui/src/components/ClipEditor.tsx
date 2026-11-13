@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { errorText } from '@/lib/format';
 import { Button, MaterialDialog, TextField } from './Material';
 import { ClipEditProgress } from './ClipEditProgress';
+import { titleCandidates } from '@/lib/titleCandidates';
 
 interface Props { jobId: string; clip: Clip; onClose: () => void; onSaved: () => void }
 export function ClipEditor({ jobId, clip, onClose, onSaved }: Props) {
@@ -13,6 +14,8 @@ export function ClipEditor({ jobId, clip, onClose, onSaved }: Props) {
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [progress, setProgress] = useState<EditProgress>({ stage: 'preparing', completed_seconds: 0, total_seconds: null, elapsed_seconds: 0 });
   const changesBounds = Number(start) !== clip.start_seconds || Number(end) !== clip.end_seconds;
+  const candidates = titleCandidates(clip.recognition, clip.title_resolution);
+  const pick = (value: string, artistValue: string) => { setTitle(value); setArtist(artistValue); };
   const form = useRef<HTMLFormElement>(null);
   const save = async () => {
     if (!form.current?.reportValidity() || busy) return;
@@ -29,6 +32,14 @@ export function ClipEditor({ jobId, clip, onClose, onSaved }: Props) {
   return <MaterialDialog open title="编辑片段" dismissible={!busy} onClose={() => { if (!busy) onClose(); }}>
     <form ref={form} className="clip-editor" onSubmit={(event) => { event.preventDefault(); void save(); }}>
       <p className="helper">时间以原视频为基准，单位为秒。仅修改歌名或歌手时直接保存，修改时间范围后重新导出。</p>
+      {candidates.length > 0 && <div className="title-candidates"><p className="helper">
+        {candidates.length > 1 ? '识曲结果不一致，请选择正确歌名或手动填写：' : '识曲候选：'}</p>
+        <div className="title-candidate-list">{candidates.map((item) =>
+          <Button key={`${item.title}-${item.sources.join()}`} variant="text" disabled={busy}
+            onClick={() => pick(item.title, item.artist)}>{item.title}
+            {item.artist && <span className="muted"> · {item.artist}</span>}
+            <span className="muted"> · {item.sources.join('/')}</span></Button>)}</div>
+      </div>}
       <TextField label="歌曲标题" value={title} onChange={setTitle} disabled={busy} />
       <TextField label="歌手" value={artist} onChange={setArtist} disabled={busy} />
       <div className="field-grid">

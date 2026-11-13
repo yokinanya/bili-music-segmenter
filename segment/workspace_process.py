@@ -12,9 +12,9 @@ from threading import Thread
 
 from segment.event_pipe import EVENTS_ENV, HANDLE_ENV, open_event_pipe
 from segment.music_agent.runtime import PROGRESS_PREFIX
-from segment.upload_progress import UPLOAD_PREFIX
 from segment.usage import EVENT_PREFIX
 from segment.workspace_downloads import DOWNLOAD_PREFIX
+from segment.workspace_options import RETIRED_OPTIONS
 
 READ_BYTES = 65536
 STOP_TIMEOUT_SECONDS = 15
@@ -24,7 +24,6 @@ ENV_OPTION_NAMES = {
     "boundary_context_seconds": "BOUNDARY_CONTEXT",
     "use_shazam": "SKIP_SHAZAM",
     "use_netease": "SKIP_NETEASE",
-    "use_title_model": "NO_TITLE_MODEL",
 }
 
 
@@ -56,6 +55,8 @@ def command_for(item: dict) -> list[str]:
 def child_environment(job: dict, item: dict, *, event_fd: int, state_dir: Path, onto_handle: bool = False) -> dict:
     options = {}
     for name, value in job["options"].items():
+        if name in RETIRED_OPTIONS:
+            continue
         if name.startswith("use_"):
             value = not value
         options["MUSIC_AGENT_" + ENV_OPTION_NAMES.get(name, name.upper())] = str(value).lower()
@@ -127,7 +128,6 @@ class ProcessRunner:
 def _collect_events(fd: int, report, errors: list) -> None:
     prefixes = {
         PROGRESS_PREFIX: "progress",
-        UPLOAD_PREFIX: "upload",
         EVENT_PREFIX: "usage",
         DOWNLOAD_PREFIX: "download",
     }

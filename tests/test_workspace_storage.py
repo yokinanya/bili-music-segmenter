@@ -1,15 +1,12 @@
 import io
-from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 from workspace_support import add_upload, make_jobs, start, wait_for_job
 
-from segment.music_agent.audio_cache import AudioCache, clean_audio_cache
 from segment.music_agent.runtime import Runtime
 from segment.workspace_options import default_options
 from segment.workspace_records import reduce_event
-from segment.workspace_store import DocumentStore
 
 
 def test_streaming_digest_same_names_and_aborted_upload(tmp_path):
@@ -72,7 +69,7 @@ def test_restart_marks_unfinished_tasks_and_steps_interrupted(tmp_path):
 
 
 def test_cleanup_error_is_retryable(tmp_path):
-    cleanup = Mock(side_effect=RuntimeError("S3 permission denied"))
+    cleanup = Mock(side_effect=RuntimeError("permission denied"))
     jobs = make_jobs(tmp_path, cleanup=cleanup)
     try:
         identity = start(jobs)
@@ -116,32 +113,6 @@ def test_checkpoints_validate_inputs_and_recover_success(tmp_path):
     with pytest.raises(ValueError):
         resumed.run({"id": "invalid", "label": "校验失败"}, Mock(side_effect=ValueError("bad model")))
     assert resumed.run({"id": "invalid", "label": "校验失败"}, lambda: "valid") == "valid"
-
-
-def test_s3_shared_references_missing_object_and_explicit_errors(tmp_path):
-    current = runtime(tmp_path)
-    objects = set()
-    storage = Mock(identity={"bucket": "audio", "endpoint": "https://storage.test"})
-    storage.exists.side_effect = lambda key: key in objects
-    storage.upload.side_effect = lambda key, path: objects.add(key)
-    storage.delete.side_effect = lambda key: objects.discard(key)
-    extract = Mock(return_value=Path("audio.wav"))
-    cache = AudioCache(storage, current.config, DocumentStore(tmp_path / "workspace.sqlite3"))
-    payload = {"prefix": "music", "source": "digest", "start": 1, "end": 2}
-    key = cache.acquire(payload, extract)
-    other = AudioCache(storage, {**current.config, "owner": "job-two"}, cache.store)
-    assert other.acquire(payload, extract) == key
-    assert storage.upload.call_count == extract.call_count == 1
-    clean_audio_cache(cache.store, "job-one", storage)
-    storage.delete.assert_not_called()
-    objects.clear()
-    assert other.acquire(payload, extract) == key
-    assert storage.upload.call_count == 2
-    storage.exists.side_effect = PermissionError("403")
-    with pytest.raises(PermissionError):
-        other.acquire(payload, extract)
-    clean_audio_cache(cache.store, "job-two", storage)
-    storage.delete.assert_called_once_with(key)
 
 
 def test_out_of_order_progress_and_stale_attempt_ignored(tmp_path):

@@ -12,11 +12,8 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from segment.logs import configure_logging, log_dir, server_log_path
-from segment.music_agent.audio_cache import clean_audio_cache
-from segment.music_agent.config import load_config
+from segment.logs import configure_logging, server_log_path
 from segment.music_agent.media_cache import clean_local_cache
-from segment.music_agent.storage import create_storage
 from segment.usage import UsageTotals
 from segment.webui_jobs import Jobs
 from segment.workspace_edit_stream import STREAM_CONTENT_TYPE, stream_edit
@@ -175,8 +172,6 @@ def create_jobs(root: Path, *, runner=None, cleanup=None) -> Jobs:
     execution = Execution(store, runner or ProcessRunner(), root, usage=usage)
 
     def clean(owner):
-        if any(owner in item["owners"] for item in store.list("audio_cache")):
-            clean_audio_cache(store, owner, create_storage(load_config()))
         clean_local_cache(store, owner)
 
     return Jobs(
@@ -186,7 +181,6 @@ def create_jobs(root: Path, *, runner=None, cleanup=None) -> Jobs:
             "root": root,
             "execution": execution,
             "cleanup": cleanup or clean,
-            "legacy_path": log_dir() / "webui-history.json",
             "usage": usage,
         },
     )

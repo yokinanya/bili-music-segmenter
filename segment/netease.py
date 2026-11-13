@@ -1,14 +1,18 @@
 import json
 import os
 import pprint
+import re
 import subprocess
 import tempfile
+import time
+import unicodedata
 from collections.abc import Iterable
 
 from segment.shazam import legalize_filename
 
 DEFAULT_TIMEOUT = 60
 AFP_DURATION = 3
+# 从切片开头取样。实测从开头取点比从中间取稳定：中段会采到间奏与临近音频，混入翻唱/伴奏版本。
 AFP_OFFSETS = (6, 12, 20, 30)
 AFP_SAMPLE_RATE = 8000
 DEFAULT_REJECTS = (("劫", "黄霄雲"),)
@@ -23,15 +27,117 @@ def netease_title(match):
     return [legalize_filename(title), legalize_filename(artist)]
 
 
-async def netease_orig(
+def probe_duration(file):
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(file),
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    return float(result.stdout.strip())
+
+
+def sample_offsets(duration, offsets=AFP_OFFSETS):
+    """丢弃超出切片或与上一采样窗口重叠的起点，保证每个采样听到的是不同音频。"""
+    if duration < AFP_DURATION:
+        return ()
+    points = []
+    for offset in parse_offsets(offsets):
+        if 0 <= offset <= duration - AFP_DURATION:
+            points.append(offset)
+    ordered = sorted(set(points))
+    # 相邻采样窗口重叠会让多个点实际上听的是同一段音频，投票就失去意义。
+    spaced = []
+    for item in ordered:
+        if not spaced or item - spaced[-1] >= AFP_DURATION:
+            spaced.append(item)
+    return tuple(spaced)
+
+
+# 只有明确的版本附注才算同一作品；单字「版」「款」太宽泛，会误删「温柔版」这类真实歌名。
+VARIANT_WORDS = (
+    "cover",
+    "翻自",
+    "翻唱",
+    "伴奏",
+    "纯享",
+    "纯音乐",
+    "instrumental",
+    "inst",
+    "remix",
+    "live",
+    "原版",
+    "伴奏版",
+    "现场版",
+    "重制版",
+    "完整版",
+    "纯享版",
+    "版本",
+)
+_BRACKETS = re.compile(r"[（(\[【]([^（()）\[\]【】]*)[）)\]】]")
+_DASH_SUFFIX = re.compile(r"\s+-\s+.*$")
+
+
+def netease_match_key(match):
+    """同一作品常有 cover/伴奏/纯享版等版本，投票只按归一化歌名归并，艺人差异不拆分票。"""
+    title, _ = netease_title(match)
+    return normalize_song_text(variant_free(title))
+
+
+def variant_free(title):
+    """去掉版本附注，只保留歌名主体；歌名自身的括号内容保留。"""
+    text = title.strip().strip("《》\"“”'’ ")
+    # 只去掉含有版本词的括号，歌名自身括号内的内容保留。
+    text = _BRACKETS.sub(
+        lambda m: " " if any(word in m.group(1).casefold() for word in VARIANT_WORDS) else m.group(0), text
+    )
+    return _DASH_SUFFIX.sub("", text)
+
+
+def normalize_song_text(value):
+    return "".join(char for char in unicodedata.normalize("NFKC", value).casefold() if char.isalnum())
+
+
+def vote_match(matches):
+    """得票最多者胜出；平票无法判断时返回 None，交给标题裁决。"""
+    tally = {}
+    for match in matches:
+        key = netease_match_key(match)
+        if key:
+            tally.setdefault(key, []).append(match)
+    if not tally:
+        return None
+    groups = sorted(tally.values(), key=len, reverse=True)
+    # 两个不同作品票数相同说明采样点各自听到了不同歌曲，不能替模型挑一个。
+    if len(groups) > 1 and len(groups[0]) == len(groups[1]):
+        return None
+    return groups[0][0]
+
+
+def netease_orig(
     file,
     *,
+    duration=None,
     cookie="",
     offsets=AFP_OFFSETS,
     rejects=DEFAULT_REJECTS,
     timeout=DEFAULT_TIMEOUT,
+    deadline=None,
 ):
-    match = _recognize_with_offsets(file, cookie=cookie, offsets=offsets, timeout=timeout)
+    if duration is None:
+        duration = probe_duration(file)
+    match = _recognize_with_offsets(
+        file, duration=duration, cookie=cookie, offsets=offsets, timeout=timeout, deadline=deadline
+    )
     title = netease_title(match)
     _raise_if_rejected(title, rejects)
     return title, match
@@ -74,15 +180,42 @@ def _raise_if_rejected(title, rejects):
             raise NetEaseRejectedMatch(f"NetEase rejected known bad match: {title_text} by {artist_text}")
 
 
-def _recognize_with_offsets(file, *, cookie, offsets, timeout):
-    failures = []
-    for offset in parse_offsets(offsets):
+class NetEaseDisagreement(ValueError):
+    """多个采样点给出不同作品；不能假装其中一个是正确答案。"""
+
+    def __init__(self, groups):
+        self.groups = groups
+        super().__init__("；".join(f"offset={offset}: {title}/{artist}" for offset, title, artist in groups))
+
+
+def _recognize_with_offsets(file, *, duration, cookie, offsets, timeout, deadline=None):
+    points = sample_offsets(duration, offsets)
+    if not points:
+        raise ValueError(f"识曲音频 {duration:.1f} 秒短于一个 {AFP_DURATION} 秒采样窗口")
+    matches, failures, collected = [], [], []
+    started = time.monotonic()
+    for index, point in enumerate(points):
+        # 单点超时不是总时限：按剩余时间裁剪，用尽后跳过剩余采样点，沿用已有多数结果。
+        remaining = None if deadline is None else deadline - (time.monotonic() - started)
+        if remaining is not None and remaining <= 0:
+            failures.append(f"skipped {len(points) - index} samples: deadline={deadline:.0f}s")
+            break
+        limit = timeout if remaining is None else min(timeout, remaining)
         try:
-            audio_fp = generate_audio_fp(file, offset)
-            return _post_audio_match(audio_fp, duration=AFP_DURATION, cookie=cookie, timeout=timeout)
+            audio_fp = generate_audio_fp(file, point)
+            match = _post_audio_match(audio_fp, duration=AFP_DURATION, cookie=cookie, timeout=limit)
         except NetEaseNoMatch as error:
-            failures.append(f"offset={offset}: {error}")
-    raise NetEaseNoMatch("; ".join(failures))
+            failures.append(f"offset={point}: {error}")
+            continue
+        matches.append(match)
+        collected.append((point, *netease_title(match)))
+    # 不同起点可能听到不同录音，按多数决取一致的候选；平票交由标题裁决，不替模型挑一个。
+    winner = vote_match(matches)
+    if winner is None:
+        if matches:
+            raise NetEaseDisagreement(collected)
+        raise NetEaseNoMatch("; ".join(failures))
+    return winner
 
 
 def _post_audio_match(audio_fp, *, duration, cookie, timeout):

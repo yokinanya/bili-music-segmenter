@@ -28,8 +28,6 @@ webui/next-env.d.ts
 webui/tsconfig.tsbuildinfo
 
 # Generated output and runtime state
-/input/*
-!/input/.gitkeep
 /output/
 /logs/
 *.log

@@ -59,7 +59,7 @@ class Runtime:
         self._stamps: dict[str, str] = {}
         self._budgets = {
             name: BoundedSemaphore(config["options"][name + "_concurrency"])
-            for name in ("model", "recognizer", "upload", "media")
+            for name in ("model", "recognizer", "media")
         }
 
     def advance(self, identity: str, label: str, total: int) -> None:
@@ -209,12 +209,3 @@ def create_runtime(media: Path, output: Path, options: dict) -> Runtime:
             "state_dir": os.getenv("MUSIC_AGENT_STATE_DIR", str(output / ".runtime")),
         }
     )
-
-
-def checkpoint(kind: str, payload: dict, work: Callable) -> Any:
-    scope = CURRENT.get()
-    if scope is None:
-        return work()
-    payload = {**payload, "dependency": scope.runtime._stamps.get(scope.step_id)}
-    identity = f"{kind}/{fingerprint(payload)}"
-    return scope.runtime.run({"id": identity, "label": kind, "input": payload}, work)

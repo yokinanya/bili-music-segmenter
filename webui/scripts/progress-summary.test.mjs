@@ -118,22 +118,16 @@ test('merge steps with unknown totals remain indeterminate', () => {
   assert.equal(result.measurement, null);
 });
 
-test('terminal video states suppress stale active steps and uploads', () => {
+test('terminal video states suppress stale active steps', () => {
   for (const state of ['succeeded', 'failed', 'cancelled', 'interrupted', 'cleanup_pending']) {
-    const result = summarize([step()], {
-      state,
-      upload: { uploads: [{ key: 'audio.wav', state: 'uploading', transferred_bytes: 5, total_bytes: 10 }] },
-    });
+    const result = summarize([step()], { state });
     assert.equal(result.state, state);
     assert.equal(result.running, false);
     assert.equal(result.current, null);
     assert.equal(result.measurement, null);
-    assert.equal(result.uploading, null);
     assert.equal(result.details.length, 1);
-    assert.equal(result.uploads.length, 1);
   }
 });
-
 test('a terminal job overrides an unfinished selected video', () => {
   for (const state of ['failed', 'cancelled', 'interrupted', 'cleanup_pending']) {
     const result = summarize([step()], {}, { state });
@@ -188,45 +182,6 @@ test('groups duplicate errors across task, video and nested steps with every sou
 test('exposes failed steps without recorded error text', () => {
   const result = summarize([step({ state: 'failed' })], { state: 'failed' }, { state: 'failed' });
   assert.deepEqual(result.issues, [{ message: '步骤执行失败，尚无错误详情', sources: ['分块扫描'] }]);
-});
-
-test('aggregates only uploading S3 objects using their real bytes', () => {
-  const uploads = [
-    { key: 'first.wav', state: 'uploading', transferred_bytes: 20, total_bytes: 100 },
-    { key: 'second.wav', state: 'uploading', transferred_bytes: 30, total_bytes: 200 },
-    { key: 'done.wav', state: 'completed', transferred_bytes: 900, total_bytes: 900 },
-  ];
-  const result = summarize([], { upload: { uploads } });
-  assert.deepEqual(result.uploading, { count: 2, completed: 50, total: 300 });
-  assert.deepEqual(result.measurement, { label: 'S3 上传', completed: 50, total: 300, unit: '字节' });
-  assert.equal(result.uploads, uploads);
-});
-
-test('S3 aggregate total is unknown when any active upload has an unknown total', () => {
-  const result = summarize([], { upload: { uploads: [
-    { key: 'known.wav', state: 'uploading', transferred_bytes: 20, total_bytes: 100 },
-    { key: 'unknown.wav', state: 'uploading', transferred_bytes: 30, total_bytes: 0 },
-  ] } });
-  assert.deepEqual(result.uploading, { count: 2, completed: 50, total: null });
-  assert.equal(result.measurement, null);
-});
-
-test('measured work retains priority over simultaneous S3 uploads', () => {
-  const result = summarize([step({ completed: 2, total: 10, unit: '项' })], { upload: { uploads: [
-    { key: 'audio.wav', state: 'uploading', transferred_bytes: 20, total_bytes: 100 },
-  ] } });
-  assert.equal(result.measurement.unit, '项');
-  assert.equal(result.uploading.completed, 20);
-});
-
-test('S3 failures stay visible and retain all failed object keys', () => {
-  const result = summarize([], { upload: { uploads: [
-    { key: 'first.wav', state: 'failed', transferred_bytes: 10, total_bytes: 100 },
-    { key: 'second.wav', state: 'failed', transferred_bytes: 20, total_bytes: 100 },
-  ] } });
-  assert.deepEqual(result.issues, [{
-    message: 'S3 上传失败', sources: ['S3 上传 · first.wav', 'S3 上传 · second.wav'],
-  }]);
 });
 
 test('orphaned historical steps remain visible', () => {

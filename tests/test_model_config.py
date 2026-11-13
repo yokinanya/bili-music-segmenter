@@ -1,5 +1,6 @@
 import pytest
 
+from segment.music_agent import gemini
 from segment.music_agent.config import load_config
 
 
@@ -7,8 +8,7 @@ from segment.music_agent.config import load_config
 def model_env(monkeypatch):
     monkeypatch.setattr("segment.music_agent.config.load_dotenv", lambda *args: None)
     values = {
-        "DASHSCOPE_API_KEY": "sk-test-key",
-        "DASHSCOPE_BASE_URL": "https://model.example.com/compatible-mode/v1/",
+        "GEMINI_API_KEY": "test-key",
         "S3_ACCESS_KEY_ID": "test-id",
         "S3_ACCESS_KEY_SECRET": "test-secret",
         "S3_ENDPOINT": "https://s3.example.com",
@@ -19,24 +19,39 @@ def model_env(monkeypatch):
         monkeypatch.setenv(name, value)
 
 
-def test_model_url_and_key(model_env):
+def test_gemini_key_and_defaults(model_env, monkeypatch):
+    monkeypatch.delenv("GEMINI_PROXY", raising=False)
+    monkeypatch.delenv("GEMINI_AUDIO_MODEL", raising=False)
     config = load_config()
-    assert config.api_key == "sk-test-key"
-    assert config.base_url == "https://model.example.com/compatible-mode/v1"
+    assert config.gemini.api_key == "test-key"
+    assert config.gemini.proxy is None
+    assert config.gemini.model == "gemini-4-hydrogen"
 
 
-def test_swapped_model_credentials_explain_the_mistake(model_env, monkeypatch):
-    monkeypatch.setenv("DASHSCOPE_API_KEY", "https://model.example.com/v1")
-    monkeypatch.setenv("DASHSCOPE_BASE_URL", "sk-test-key")
-    with pytest.raises(ValueError, match="DASHSCOPE_BASE_URL.*DASHSCOPE_API_KEY.*填反") as error:
+def test_gemini_proxy_and_model_override(model_env, monkeypatch):
+    monkeypatch.setenv("GEMINI_PROXY", "http://127.0.0.1:7890")
+    monkeypatch.setenv("GEMINI_AUDIO_MODEL", "gemini-4-argon")
+    config = load_config()
+    assert config.gemini.proxy == "http://127.0.0.1:7890"
+    assert config.gemini.model == "gemini-4-argon"
+
+
+def test_proxy_is_installed_on_the_http_client():
+    """google-genai 没有 proxy 参数，必须通过自建 httpx 客户端注入。"""
+    client = gemini._http_client("socks5://127.0.0.1:1080")
+    try:
+        assert client._mounts
+    finally:
+        client.close()
+
+
+def test_missing_gemini_key_is_reported(model_env, monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY")
+    with pytest.raises(ValueError, match="GEMINI_API_KEY"):
         load_config()
-    assert "sk-test-key" not in str(error.value)
 
 
-@pytest.mark.parametrize(
-    "url", ["model.example.com/v1", "http://model.example.com/v1", "https://user:pass@model.example.com/v1"]
-)
-def test_model_url_still_requires_https_without_credentials(model_env, monkeypatch, url):
-    monkeypatch.setenv("DASHSCOPE_BASE_URL", url)
-    with pytest.raises(ValueError, match="DASHSCOPE_BASE_URL"):
+def test_proxy_requires_scheme(model_env, monkeypatch):
+    monkeypatch.setenv("GEMINI_PROXY", "127.0.0.1:7890")
+    with pytest.raises(ValueError, match="GEMINI_PROXY"):
         load_config()

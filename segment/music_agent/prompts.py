@@ -10,8 +10,9 @@ end_seconds 应包含该曲自然尾奏，直到歌曲结束或明确转入独�
 若能根据清晰歌词或主播明确报幕确认作品，title_hint 优先填写该作品通行的简体中文正式歌名。
 不要用拼音、罗马字或英文音译代替已有中文名。
 无法确认中文正式歌名时保留可确认的原名；不可自行翻译外语歌名、按歌词猜造歌名，无法确认作品时留空。
+若主播在演唱前或演唱后明确报出歌名，把原话片段填进 announcer_hint；没有明确报幕时留空，不要推测。
 只输出 JSON：
-{"segments":[{"start_seconds":0.0,"end_seconds":120.0,"classification":"host_singing|background_music_chat|mixed_singing_and_chat|uncertain","confidence":0.0,"host_singing_present":true,"title_hint":"可明确听出的歌名，否则留空","rationale":"简述人声归属和边界依据"}]}
+{"segments":[{"start_seconds":0.0,"end_seconds":120.0,"classification":"host_singing|background_music_chat|mixed_singing_and_chat|uncertain","confidence":0.0,"host_singing_present":true,"title_hint":"可明确听出的歌名，否则留空","announcer_hint":"主播报幕原话片段，否则留空","rationale":"简述人声归属和边界依据"}]}
 候选起点和终点均须位于实际输入音频范围内。没有可用音乐候选时 segments 返回空数组。"""
 
 BOUNDARY_PROMPT = """你是高精度直播歌切边界复核器。判断目标范围内是否有主播本人清晰演唱。
@@ -32,6 +33,8 @@ rationale 必须分别说明前奏起点、第一句人声位置和尾奏终点�
 若不能确认主播本人在唱，host_singing_present=false 且 intervals=[]。"""
 
 TITLE_PROMPT = """两个音乐识别服务给出了不同结果。结合现场录音辨认出的歌词和主播说明，判断哪一项更可能是同一首作品。
+netease.samples 是同一片段多个起点分别识别的结果：起点不同可能命中不同录音，
+或前奏里播放的其他歌曲，以多数一致的候选为准；无法形成多数时选 unresolved。
 繁简字差异、版本附注、括号中的影视剧名不应被视为不同歌曲；艺人可能是原唱、翻唱者或上传者。
 你只能从候选中选，不得创造新歌名。证据不足选 unresolved。
 原曲、翻唱或不同语言填词版可能共用伴奏，指纹命中不同标题不一定意味着旋律不同；艺人的外文名与中文名也可能指同一人。

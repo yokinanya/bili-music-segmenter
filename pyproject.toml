@@ -3,10 +3,9 @@ name = "bili-music-segmenter"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "shazamio<0.8",
-    "openai>=1.68",
+    "shazamio>=0.9,<1",
+    "google-genai>=3.3.0",
     "opencc-python-reimplemented>=0.1.7",
-    "boto3>=1.35",
     "python-dotenv>=1.0",
     "yt-dlp>=2026.10.26",
     "httpx[socks]>=0.28.1",

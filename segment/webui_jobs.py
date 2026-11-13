@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import shutil
 from pathlib import Path
 from threading import RLock
@@ -11,12 +10,11 @@ from segment.music_agent.export import export_video
 from segment.music_agent.media import media_duration
 from segment.music_agent.runtime import fingerprint
 from segment.workspace_downloads import register_download, validate_download
-from segment.workspace_options import default_options, validate_options
+from segment.workspace_options import RETIRED_OPTIONS, default_options, validate_options
 from segment.workspace_parts import can_complete_parts, is_bilibili_video
 from segment.workspace_records import ACTIVE_STATES, end_steps, new_job
 from segment.workspace_result_edit import edit_result, manifest_path
 from segment.workspace_results import history_entry, make_archive, read_clips
-from segment.workspace_uploads import now
 
 LOG_READ_BYTES = 256 * 1024
 
@@ -38,9 +36,6 @@ class Jobs:
         self._lock = RLock()
         self._job_locks = {}
         self._reconcile()
-        legacy = services.get("legacy_path")
-        if legacy and legacy.exists():
-            self._import_legacy(legacy)
 
     def _reconcile(self) -> None:
         for job in self.store.list("jobs"):
@@ -137,6 +132,7 @@ class Jobs:
         job = self.store.get("jobs", identity)
         return {
             **job,
+            "options": {key: value for key, value in job["options"].items() if key not in RETIRED_OPTIONS},
             "can_complete_parts": can_complete_parts(job, self.store),
             "batch": [self._public_item(item) for item in job["batch"]],
             "clips": [clip for item in job["batch"] for clip in read_clips(item)],
@@ -268,20 +264,6 @@ class Jobs:
                 continue
             if any(source["id"] == identity for source in self.store.list("uploads")):
                 self.uploads.remove(identity, excluding_job=excluding)
-
-    def _import_legacy(self, path: Path) -> None:
-        for entry in json.loads(path.read_text(encoding="utf-8")):
-            identity = entry["id"]
-            self.store.put(
-                "legacy",
-                {
-                    **entry,
-                    "id": identity,
-                    "legacy": True,
-                    "started_at": entry.get("started_at", entry.get("finished_at", now())),
-                    "availability": "仅有旧版摘要，详情与源文件不可续跑",
-                },
-            )
 
     def close(self) -> None:
         self.execution.close()

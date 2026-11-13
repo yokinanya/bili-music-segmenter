@@ -7,10 +7,9 @@ from dataclasses import asdict
 from pathlib import Path
 
 from segment.music_agent.pipeline_context import PipelineContext
-from segment.music_agent.qqmusic import apply_verification
 from segment.music_agent.runtime import fingerprint
 
-TITLE_PIPELINE_VERSION = "qqmusic-lyrics-v1"
+TITLE_PIPELINE_VERSION = "recognition-only-v1"
 
 
 async def prepare_candidate(candidate, context: PipelineContext) -> dict:
@@ -26,12 +25,9 @@ async def _prepare(candidate, context: PipelineContext) -> dict:
         return {**record, "decision": "background_music_skipped"}
     if candidate.classification == "uncertain" or candidate.confidence < context.options["minimum_confidence"]:
         return {**record, "decision": "uncertain_or_low_confidence_skipped"}
-    spec = context.spec(f"boundary/{candidate.index}", "边界复核", asdict(candidate))
-    intervals, boundary = await asyncio.to_thread(
-        context.runtime.run, spec, lambda: context.services.refine(candidate, context)
-    )
+    # 扫描已直接给出完整歌曲边界，这里不再逐候选精修；仅在发现疑点时由全场审核触发复核。
     prepared = []
-    for start, end in intervals:
+    for start, end in [(candidate.start, candidate.end)]:
         if end - start < context.options["minimum_singing_seconds"]:
             continue
         interval = {"start_seconds": start, "end_seconds": end, "duration_seconds": round(end - start, 3)}
@@ -39,7 +35,6 @@ async def _prepare(candidate, context: PipelineContext) -> dict:
         prepared.append({**interval, **metadata})
     return {
         **record,
-        "boundary_review": boundary,
         "singing_intervals": prepared,
         "decision": "prepared" if prepared else "no_confident_singing",
     }
@@ -61,33 +56,19 @@ async def _identify(interval: dict, context: PipelineContext, candidate) -> dict
     if errors:
         raise RuntimeError("识曲服务请求失败：" + "；".join(errors))
     if candidate:
-        recognition = {**recognition, "title_hint": candidate.title_hint, "candidate_rationale": candidate.rationale}
+        recognition = {
+            **recognition,
+            "title_hint": candidate.title_hint,
+            "announcer_hint": candidate.announcer_hint,
+            "candidate_rationale": candidate.rationale,
+        }
+    # 不做模型二次判断：结论只来自识曲本身，冲突时留空交给人工填写。
     title, artist, status = context.services.choose_title(recognition)
-    text_review = None
-    if status == "conflict" and context.options["use_title_model"]:
-        text_spec = context.spec("text-title/" + fingerprint(interval), "标题冲突复核", recognition)
-        result = await asyncio.to_thread(context.runtime.run, text_spec, lambda: _text_title(recognition, context))
-        text_review, (title, artist, status) = result
-    audio_review = None
-    required_audio = context.services.needs_audio(recognition, status)
-    if required_audio or context.options["use_title_model"]:
-        spec = context.spec(
-            "audio-title/" + fingerprint(interval), "音频标题复核", [TITLE_PIPELINE_VERSION, recognition]
-        )
-        result = await asyncio.to_thread(
-            context.runtime.run, spec, lambda: context.services.audio_title(interval, recognition, context)
-        )
-        if required_audio or result["status"] == "audio_verified":
-            title, artist, status = result["title"], result["artist"], result["status"]
-        audio_review = result["audio_review"]
-    qq_spec = context.spec("qqmusic/" + fingerprint(interval), "QQ 音乐歌词核对", audio_review)
-    verification = await context.runtime.async_run(qq_spec, lambda: context.services.verify_qqmusic(audio_review))
-    title, artist, status = apply_verification((title, artist, status), verification)
     return {
         "recognition": recognition,
         "title": title or "",
         "artist": artist or "",
-        "title_resolution": {"status": status, "text": text_review, "audio": audio_review, "qqmusic": verification},
+        "title_resolution": {"status": status},
     }
 
 
@@ -107,8 +88,3 @@ def _recognition_audio(interval: dict, context: PipelineContext) -> Path:
         "validate": lambda value: Path(value).is_file(),
     }
     return Path(context.runtime.run(spec, lambda: str(context.runtime.local_cache.acquire(payload, extract))))
-
-
-def _text_title(recognition: dict, context: PipelineContext) -> list:
-    response = context.services.text_title(recognition, context)
-    return [response, context.services.resolve_text(recognition, response["data"])]

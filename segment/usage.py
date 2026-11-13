@@ -1,4 +1,4 @@
-"""In-memory token accounting using the official price screenshots dated 2026-10-20."""
+"""In-memory token accounting using the official Gemini API prices dated 2026-11-13 (USD per 1M tokens)."""
 
 from __future__ import annotations
 
@@ -11,9 +11,14 @@ from segment.events import emit_event
 EVENT_PREFIX = "__MUSIC_AGENT_USAGE__"
 LOGGER = logging.getLogger(__name__)
 MILLION = Decimal(1_000_000)
+# (输入, 缓存输入, 输出)，单位美元/百万 token；缓存价为官方隐式缓存价。
 PRICES = {
-    "qwen3.8-flash": (Decimal("0.8"), Decimal("0.1"), Decimal("2.7")),
-    "qwen3.8-omni-flash": (Decimal("0.8"), Decimal("0.1"), Decimal("2.7")),
+    "gemini-4-hydrogen": (Decimal("1.50"), Decimal("0.075"), Decimal("7.50")),
+    "gemini-4-argon": (Decimal("2.00"), Decimal("0.10"), Decimal("10.00")),
+    "gemini-4-carbon": (Decimal("2.00"), Decimal("0.10"), Decimal("10.00")),
+    "gemini-3.8-flash": (Decimal("0.75"), Decimal("0.075"), Decimal("3.75")),
+    "gemini-3.6-flash": (Decimal("0.75"), Decimal("0.075"), Decimal("3.75")),
+    "gemini-3.5-flash-lite": (Decimal("0.75"), Decimal("0.075"), Decimal("3.75")),
 }
 
 
@@ -22,10 +27,15 @@ def report_usage(model: str, usage: dict | None) -> None:
 
 
 def _tokens(usage: dict) -> tuple[int, int, int]:
-    prompt = usage["prompt_tokens"]
-    completion = usage["completion_tokens"]
-    details = usage.get("prompt_tokens_details") or {}
-    cached = details.get("cached_tokens", 0)
+    if "total_input_tokens" in usage:
+        prompt = usage["total_input_tokens"]
+        completion = usage["total_output_tokens"]
+        cached = usage.get("total_cached_tokens", 0)
+    else:
+        prompt = usage["prompt_tokens"]
+        completion = usage["completion_tokens"]
+        details = usage.get("prompt_tokens_details") or {}
+        cached = details.get("cached_tokens", 0)
     if any(type(value) is not int or value < 0 for value in (prompt, completion, cached)) or cached > prompt:
         raise ValueError("模型 usage token 数值无效")
     return prompt, completion, cached

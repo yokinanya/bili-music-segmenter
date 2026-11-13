@@ -3,11 +3,11 @@ export type StepState = JobState | 'waiting' | 'reused' | 'skipped' | 'retrying'
 export interface SourceAsset { id: string; name: string; size_bytes: number; state: 'pending' | 'uploading' | 'ready' | 'failed'; sha256: string; error: string | null; referenced?: boolean }
 export interface DraftFile { key: string; source?: SourceAsset; file?: File; name: string; size: number; sent: number; state: 'pending' | 'uploading' | 'ready' | 'failed' | 'cancelled'; error?: string }
 export interface RunOptions {
-  scan_concurrency: number; candidate_concurrency: number; model_concurrency: number;
-  recognizer_concurrency: number; upload_concurrency: number; media_concurrency: number;
+  candidate_concurrency: number; model_concurrency: number;
+  recognizer_concurrency: number; media_concurrency: number;
   chunk_seconds: number; chunk_context_seconds: number; boundary_context_seconds: number;
   minimum_candidate_seconds: number; minimum_singing_seconds: number; minimum_confidence: number;
-  use_shazam: boolean; use_netease: boolean; use_title_model: boolean;
+  use_shazam: boolean; use_netease: boolean;
 }
 export interface ProgressStep {
   id: string; parent_id: string | null; label: string; state: StepState; completed: number;
@@ -18,7 +18,6 @@ export interface BatchItem {
   id: string; upload_id: string; media: string; state: JobState; steps: ProgressStep[];
   error: string | null; started_at: string | null; finished_at: string | null;
   source_type?: 'upload' | 'download'; source_url?: string; can_reuse?: boolean;
-  upload?: { uploads: { key: string; total_bytes: number; transferred_bytes: number; state: string }[] };
 }
 export interface Clip { id: string; media_id: string; name: string; title: string; artist: string; duration_seconds: number; start_seconds: number; end_seconds: number; source_name: string; recognition?: unknown; title_resolution?: unknown }
 export interface ClipEdit { title: string; artist: string; start_seconds: number; end_seconds: number }

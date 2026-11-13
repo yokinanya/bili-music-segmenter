@@ -80,10 +80,6 @@ def reduce_event(job: dict, index: int, *, kind: str, event: dict, attempt: int)
         from segment.workspace_downloads import update_download
 
         return update_download(job, index, event)
-    if kind == "upload":
-        uploads = {value["key"]: value for value in item.get("upload", {}).get("uploads", [])}
-        uploads[event["key"]] = event
-        return replace_item(job, index, {**item, "upload": {"uploads": list(uploads.values())}})
     if event["attempt"] != attempt or event["sequence"] <= item["last_sequence"]:
         return job
     steps = {step["id"]: step for step in item["steps"]}

@@ -15,8 +15,6 @@ class PipelineContext:
     services: Any
     runtime: Any
     client: Any
-    storage: Any
-    prefix: str
 
     def spec(self, identity: str, label: str, payload: Any) -> dict:
         return {"id": identity, "label": label, "input": [self.options, payload]}

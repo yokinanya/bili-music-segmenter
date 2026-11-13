@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import unicodedata
 from pathlib import Path
 from typing import Any
@@ -11,8 +10,11 @@ from typing import Any
 from opencc import OpenCC
 
 from segment.music_agent.runtime import CURRENT, fingerprint
-from segment.netease import NetEaseNoMatch, netease_orig
+from segment.netease import NetEaseDisagreement, NetEaseNoMatch, netease_orig, variant_free
 from segment.shazam import parse_shazam_response, shazam_orig, shazam_title
+
+# 网易云改为多采样点投票后，旧缓存里的单点结果不能复用。
+NETEASE_VOTE_VERSION = "netease-vote-v1"
 
 
 def _outcome(result: tuple[Any, Any] | None, error: BaseException | None) -> dict[str, Any]:
@@ -65,7 +67,11 @@ async def recognize_audio(
 
         if scope:
             return await scope.runtime.async_run(
-                {"id": identity, "label": f"{provider} 识曲", "input": [str(audio), provider, netease_cookie]},
+                {
+                    "id": identity,
+                    "label": f"{provider} 识曲",
+                    "input": [str(audio), provider, netease_cookie, NETEASE_VOTE_VERSION],
+                },
                 request,
             )
         return await request()
@@ -97,59 +103,54 @@ async def _run_shazam(audio: str, timeout: int) -> dict:
 
 
 def _netease_blocking(audio: str, cookie: str, timeout: int) -> dict[str, Any]:
-    """``netease_orig`` is fully blocking (FFmpeg + Node), hence the worker thread."""
+    """``netease_orig`` 是同步的（FFmpeg + Node），因此独占一个工作线程。
+
+    多个采样点串行执行，整体时限设为 ``timeout``，避免慢网络下累计等待数倍超时。
+    """
     try:
-        return _outcome(
-            asyncio.run(netease_orig(audio, cookie=cookie, rejects=(), timeout=timeout)),
-            None,
-        )
-    except NetEaseNoMatch:
-        return {"status": "no_match"}
+        return _outcome(netease_orig(audio, cookie=cookie, rejects=(), timeout=timeout, deadline=timeout), None)
+    except (NetEaseNoMatch, NetEaseDisagreement) as error:
+        return netease_outcome(error)
     except Exception as error:
         return _outcome(None, error)
 
 
+def netease_outcome(error: BaseException) -> dict[str, Any]:
+    """不同起点识别到不同作品时标记 conflict 交给标题裁决，不能静默采用其中一个。"""
+    if isinstance(error, NetEaseDisagreement):
+        return {"status": "conflict", "error": str(error), "samples": [list(item) for item in error.groups]}
+    if isinstance(error, NetEaseNoMatch):
+        return {"status": "no_match"}
+    return _outcome(None, error)
+
+
 def normalize_title(value: str) -> str:
     text = unicodedata.normalize("NFKC", OpenCC("t2s").convert(value)).casefold()
-    text = re.sub(r"[（(][^）)]*[）)]", " ", text)
-    text = re.sub(r"\b(?:live|伴奏|翻唱|翻自|remaster(?:ed)?|version)\b", " ", text)
+    # 只剥离版本附注（cover/伴奏/纯享版…），歌名本身不同的括号内容必须保留。
+    text = variant_free(text)
     return "".join(char for char in text if char.isalnum())
 
 
 def deterministic_title_choice(
     references: dict[str, Any],
 ) -> tuple[str, str, str]:
+    """歌名决定结论，歌手只作展示：同名不同歌手不算冲突。"""
     shazam = references.get("shazam", {})
     netease = references.get("netease", {})
     shazam_ok = shazam.get("status") == "matched"
     netease_ok = netease.get("status") == "matched"
+    # 网易云各采样点识别到不同作品时，不能当作"没有结果"，等同识曲冲突交给人工。
+    if netease.get("status") == "conflict":
+        return "", "", "conflict"
     if shazam_ok and netease_ok:
-        first = shazam.get("title", "")
-        second = netease.get("title", "")
-        if normalize_title(first) == normalize_title(second):
-            return second or first, netease.get("artist") or shazam.get("artist", ""), "matched"
+        first = normalize_title(shazam.get("title", ""))
+        second = normalize_title(netease.get("title", ""))
+        if first == second:
+            title = netease.get("title") or shazam.get("title", "")
+            return title, netease.get("artist") or shazam.get("artist", ""), "matched"
         return "", "", "conflict"
     if netease_ok:
         return netease.get("title", ""), netease.get("artist", ""), "single_provider"
     if shazam_ok:
         return shazam.get("title", ""), shazam.get("artist", ""), "single_provider"
     return "", "", "unmatched"
-
-
-MINIMUM_TEXT_TITLE_CONFIDENCE = 0.85
-
-
-def resolve_title_with_model(references: dict[str, Any], model_result: dict[str, Any]) -> tuple[str, str, str]:
-    """Pick a provider using the text reviewer's verdict; the caller still decides whether audio is needed."""
-    choice = model_result.get("choice")
-    if choice not in {"shazam", "netease", "unresolved"}:
-        raise ValueError(f"Invalid Qwen title choice: {choice}")
-    confidence = model_result.get("confidence")
-    if type(confidence) not in (int, float) or not 0 <= confidence <= 1:
-        raise ValueError("文本标题裁决置信度无效")
-    if choice == "unresolved" or confidence < MINIMUM_TEXT_TITLE_CONFIDENCE:
-        return "", "", "unresolved"
-    selected = references.get(choice, {})
-    if selected.get("status") != "matched":
-        return "", "", "unresolved"
-    return selected.get("title", ""), selected.get("artist", ""), "qwen_resolved"

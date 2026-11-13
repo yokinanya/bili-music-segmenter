@@ -10,7 +10,6 @@ const BATCH_ISSUES = [
   { state: 'cleanup_pending', label: '清理未完成' },
 ] as const;
 
-type Upload = NonNullable<BatchItem['upload']>['uploads'][number];
 type ProgressJob = Pick<JobStatus, 'state' | 'attempt' | 'error' | 'cleanup_error'>;
 
 export interface ProgressMeasurement {
@@ -76,28 +75,10 @@ function currentWork(details: readonly StepDetail[], attempt: number) {
   return { current, parallelCount: Math.max(0, leaves.length - 1) };
 }
 
-function uploadSummary(uploads: readonly Upload[]) {
-  const active = uploads.filter((upload) => upload.state === 'uploading');
-  if (!active.length) return null;
-  const completed = active.reduce((sum, upload) => sum + upload.transferred_bytes, 0);
-  const total = active.every((upload) => upload.total_bytes > 0)
-    ? active.reduce((sum, upload) => sum + upload.total_bytes, 0)
-    : null;
-  return { count: active.length, completed, total };
-}
-
-function runningProgress({ details, uploads, attempt }: {
-  readonly details: readonly StepDetail[];
-  readonly uploads: readonly Upload[];
-  readonly attempt: number;
-}) {
+function runningProgress(details: readonly StepDetail[], attempt: number) {
   const { current, parallelCount } = currentWork(details, attempt);
-  const uploading = uploadSummary(uploads);
-  const stepMeasurement = current ? measurementOf([current.step, ...current.ancestors]) : null;
-  const uploadMeasurement: ProgressMeasurement | null = uploading?.total
-    ? { label: 'S3 上传', completed: uploading.completed, total: uploading.total, unit: '字节' }
-    : null;
-  return { current, parallelCount, measurement: stepMeasurement ?? uploadMeasurement, uploading };
+  const measurement = current ? measurementOf([current.step, ...current.ancestors]) : null;
+  return { current, parallelCount, measurement };
 }
 
 function progressIssues({ job, item, details }: {
@@ -113,10 +94,6 @@ function progressIssues({ job, item, details }: {
       source: context ? `${context} · ${step.label}` : step.label,
       message: step.error || (step.state === 'failed' ? '步骤执行失败，尚无错误详情' : null),
     })),
-    ...(item.upload?.uploads ?? []).filter((upload) => upload.state === 'failed').map((upload) => ({
-      source: `S3 上传 · ${upload.key}`,
-      message: 'S3 上传失败',
-    })),
   ];
   const grouped = new Map<string, Set<string>>();
   for (const { source, message } of records) {
@@ -130,18 +107,16 @@ function progressIssues({ job, item, details }: {
 
 export function summarizeProgress({ job, item }: { readonly job: ProgressJob; readonly item: BatchItem }) {
   const details = describeSteps(item.steps);
-  const uploads = item.upload?.uploads ?? [];
   const state = ACTIVE_JOB_STATES.has(item.state) && !ACTIVE_JOB_STATES.has(job.state) ? job.state : item.state;
   const running = state === 'running';
   const progress = running
-    ? runningProgress({ details, uploads, attempt: job.attempt })
-    : { current: null, parallelCount: 0, measurement: null, uploading: null };
+    ? runningProgress(details, job.attempt)
+    : { current: null, parallelCount: 0, measurement: null };
   return {
     state,
     running,
     ...progress,
     details,
-    uploads,
     issues: progressIssues({ job, item, details }),
     unprocessed: item.state === 'queued' && !ACTIVE_JOB_STATES.has(job.state),
   };

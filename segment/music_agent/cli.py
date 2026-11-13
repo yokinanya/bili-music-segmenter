@@ -21,20 +21,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--outdir", type=Path, required=True, help="切片与 manifest 输出目录")
     parser.add_argument("--netease-cookie", default="")
     parser.add_argument("--chunk-seconds", type=int, default=600)
-    parser.add_argument("--scan-concurrency", type=int, default=3, help="分块扫描并发数；1 为串行")
     parser.add_argument("--candidate-concurrency", type=int, default=3)
     parser.add_argument("--model-concurrency", type=int, default=3)
     parser.add_argument("--recognizer-concurrency", type=int, default=3)
-    parser.add_argument("--upload-concurrency", type=int, default=2)
     parser.add_argument("--media-concurrency", type=int, default=min(2, os.cpu_count() or 1))
     parser.add_argument("--chunk-context", type=int, default=30)
     parser.add_argument("--boundary-context", type=int, default=20)
     parser.add_argument("--minimum-candidate-seconds", type=float, default=30)
     parser.add_argument("--minimum-singing-seconds", type=float, default=30)
     parser.add_argument("--minimum-confidence", type=float, default=0.85)
-    parser.add_argument("--title-model", default="qwen3.8-flash")
-    parser.add_argument("--summary-model", default="qwen3.8-flash")
-    parser.add_argument("--no-title-model", action="store_true", help="不使用第二个文本模型处理识曲冲突")
     parser.add_argument("--recognizer-timeout", type=int, default=60)
     parser.add_argument("--skip-shazam", action="store_true")
     parser.add_argument("--skip-netease", action="store_true")
@@ -45,8 +40,6 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    if args.scan_concurrency <= 0:
-        parser.error("--scan-concurrency 必须大于 0")
     if args.chunk_seconds <= 0:
         parser.error("--chunk-seconds 必须大于 0")
     if args.chunk_context < 0 or args.boundary_context < 0:
@@ -65,20 +58,15 @@ def main() -> None:
             args.media,
             args.outdir,
             chunk_seconds=args.chunk_seconds,
-            scan_concurrency=args.scan_concurrency,
             candidate_concurrency=args.candidate_concurrency,
             model_concurrency=args.model_concurrency,
             recognizer_concurrency=args.recognizer_concurrency,
-            upload_concurrency=args.upload_concurrency,
             media_concurrency=args.media_concurrency,
             chunk_context_seconds=args.chunk_context,
             boundary_context_seconds=args.boundary_context,
             minimum_candidate_seconds=args.minimum_candidate_seconds,
             minimum_singing_seconds=args.minimum_singing_seconds,
             minimum_confidence=args.minimum_confidence,
-            use_title_model=not args.no_title_model,
-            title_model=args.title_model,
-            summary_model=args.summary_model,
             use_shazam=not args.skip_shazam,
             use_netease=not args.skip_netease,
             netease_cookie=args.netease_cookie,

@@ -6,13 +6,13 @@ from event_capture import capture_events, child_sends
 from workspace_support import make_jobs, start, wait_for, wait_for_job
 
 from segment.music_agent.cli import build_parser
-from segment.music_agent.models import text_model_call
+from segment.music_agent.gemini import GeminiClient
 from segment.music_agent.runtime import PROGRESS_PREFIX
 from segment.usage import EVENT_PREFIX, UsageTotals
 from segment.workspace_records import usage_snapshot
 
 
-def event(model="qwen3.8-flash", usage=None):
+def event(model="gemini-4-hydrogen", usage=None):
     return {"model": model, "usage": usage}
 
 
@@ -28,7 +28,8 @@ def test_cost_with_cached_tokens():
         )
     )
     result = totals.snapshot()
-    assert result["estimated_cny"] == pytest.approx(3.15)
+    # 1M 输入含 0.5M 缓存 + 1M 输出：0.5*1.5 + 0.5*0.075 + 1*7.5 = 8.2875 美元
+    assert result["estimated_cny"] == pytest.approx(8.2875)
     assert result["complete"]
     assert result["cached_tokens"] == 500_000
     assert UsageTotals().snapshot()["calls"] == 0
@@ -69,7 +70,8 @@ def test_invalid_token_counts_are_missing_usage_and_do_not_modify_input(usage, c
     assert result["input_tokens"] == 10 and result["output_tokens"] == 2
     assert result["models"][0]["missing_usage"] == 1
     assert not result["complete"]
-    assert result["estimated_cny"] == pytest.approx(0.0000134)
+    # 10 输入 + 2 输出 @ $1.5/$7.5 每百万：0.000015 + 0.000015 = 0.00003 美元
+    assert result["estimated_cny"] == pytest.approx(0.00003)
     assert "已忽略" in caplog.text
 
 
@@ -116,21 +118,20 @@ def test_invalid_usage_does_not_stop_subsequent_process_events(tmp_path, caplog)
         jobs.close()
 
 
-def test_usage_recorded_even_if_model_json_invalid(monkeypatch, tmp_path):
-    monkeypatch.setenv("MUSIC_AGENT_JSON_RETRIES", "0")
+def test_gemini_usage_recorded_even_if_model_json_invalid(monkeypatch, tmp_path):
     capture = capture_events(monkeypatch, tmp_path)
-    usage = {"prompt_tokens": 12, "completion_tokens": 3}
-    response = SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content="bad json"))],
-        usage=SimpleNamespace(model_dump=lambda: usage),
-    )
-    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: response)))
+    usage = SimpleNamespace(total_input_tokens=12, total_output_tokens=3, total_cached_tokens=0)
+    interaction = SimpleNamespace(output_text="bad json", usage=usage)
+    client = object.__new__(GeminiClient)
+    client._client = SimpleNamespace(interactions=SimpleNamespace(create=lambda **kw: interaction))
+    client.model = "gemini-4-hydrogen"
     with pytest.raises(ValueError):
-        text_model_call(client, "qwen3.8-flash", "test")
+        client.json_call(None, "test", {"type": "object"})
     lines = capture.lines()
     assert len(lines) == 1
-    line = lines[0].strip()
-    assert json.loads(line.removeprefix(EVENT_PREFIX))["usage"] == usage
+    recorded = json.loads(lines[0].strip().removeprefix(EVENT_PREFIX))
+    assert recorded["model"] == "gemini-4-hydrogen"
+    assert recorded["usage"] == {"total_input_tokens": 12, "total_output_tokens": 3, "total_cached_tokens": 0}
 
 
 def test_subprocess_usage_persisted_and_separate_from_logs(tmp_path):
