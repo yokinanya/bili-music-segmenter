@@ -21,7 +21,6 @@ STOP_TIMEOUT_SECONDS = 15
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ENV_OPTION_NAMES = {
     "chunk_context_seconds": "CHUNK_CONTEXT",
-    "boundary_context_seconds": "BOUNDARY_CONTEXT",
     "use_shazam": "SKIP_SHAZAM",
     "use_netease": "SKIP_NETEASE",
 }

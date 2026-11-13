@@ -11,7 +11,7 @@ const ADVANCED = [
   ['model_concurrency', '模型请求并发'], ['recognizer_concurrency', '识曲请求并发'],
   ['media_concurrency', '媒体进程并发'],
   ['chunk_seconds', '扫描块时长 / 秒'], ['chunk_context_seconds', '扫描上下文 / 秒'],
-  ['boundary_context_seconds', '边界上下文 / 秒'], ['minimum_candidate_seconds', '最短候选 / 秒'],
+  ['minimum_candidate_seconds', '最短候选 / 秒'], ['recognizer_timeout', '识曲超时 / 秒'],
 ] as const;
 export function Parameters({ options, onChange }: { options: RunOptions; onChange: (value: RunOptions) => void }) {
   const set = (name: keyof RunOptions, value: number | boolean) => onChange({ ...options, [name]: value });

@@ -15,24 +15,25 @@ class RunOptions:
     media_concurrency: int = min(2, os.cpu_count() or 1)
     chunk_seconds: int = 600
     chunk_context_seconds: int = 30
-    boundary_context_seconds: int = 20
     minimum_candidate_seconds: float = 30
     minimum_singing_seconds: float = 30
     minimum_confidence: float = 0.85
     use_shazam: bool = True
     use_netease: bool = True
+    recognizer_timeout: int = 60
 
 
 ENV_NAMES = {
     "chunk_context_seconds": "CHUNK_CONTEXT",
-    "boundary_context_seconds": "BOUNDARY_CONTEXT",
     "use_shazam": "SKIP_SHAZAM",
     "use_netease": "SKIP_NETEASE",
 }
-NONNEGATIVE = {"chunk_context_seconds", "boundary_context_seconds"}
+NONNEGATIVE = {"chunk_context_seconds"}
 BOOLEAN_FIELDS = {"use_shazam", "use_netease"}
 FLOAT_FIELDS = {"minimum_candidate_seconds", "minimum_singing_seconds", "minimum_confidence"}
-RETIRED_OPTIONS = frozenset({"scan_concurrency", "upload_concurrency", "use_title_model"})
+RETIRED_OPTIONS = frozenset(
+    {"scan_concurrency", "upload_concurrency", "use_title_model", "boundary_context_seconds"}
+)
 
 
 def default_options() -> dict:

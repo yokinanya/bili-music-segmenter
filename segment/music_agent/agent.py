@@ -66,14 +66,11 @@ def _options(settings: dict) -> dict:
     extras = {
         "audio_model": AUDIO_MODEL,
         "netease_cookie": "",
-        "recognizer_timeout": 60,
     }
     unknown = settings.keys() - defaults.keys() - extras.keys() - {"manifest_path"}
     if unknown:
         raise TypeError(f"未知参数：{', '.join(sorted(unknown))}")
     extra_values = {key: settings.get(key, value) for key, value in extras.items()}
-    if extra_values["recognizer_timeout"] <= 0:
-        raise ValueError("识曲超时必须为正")
     return {**validate_options(overrides, defaults), **extra_values}
 
 

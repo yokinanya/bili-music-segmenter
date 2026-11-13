@@ -26,7 +26,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--recognizer-concurrency", type=int, default=3)
     parser.add_argument("--media-concurrency", type=int, default=min(2, os.cpu_count() or 1))
     parser.add_argument("--chunk-context", type=int, default=30)
-    parser.add_argument("--boundary-context", type=int, default=20)
     parser.add_argument("--minimum-candidate-seconds", type=float, default=30)
     parser.add_argument("--minimum-singing-seconds", type=float, default=30)
     parser.add_argument("--minimum-confidence", type=float, default=0.85)
@@ -42,7 +41,7 @@ def main() -> None:
     args = parser.parse_args()
     if args.chunk_seconds <= 0:
         parser.error("--chunk-seconds 必须大于 0")
-    if args.chunk_context < 0 or args.boundary_context < 0:
+    if args.chunk_context < 0:
         parser.error("上下文时长不能为负")
     if not 0 < args.minimum_confidence <= 1:
         parser.error("--minimum-confidence 必须大于 0 且不超过 1")
@@ -63,7 +62,6 @@ def main() -> None:
             recognizer_concurrency=args.recognizer_concurrency,
             media_concurrency=args.media_concurrency,
             chunk_context_seconds=args.chunk_context,
-            boundary_context_seconds=args.boundary_context,
             minimum_candidate_seconds=args.minimum_candidate_seconds,
             minimum_singing_seconds=args.minimum_singing_seconds,
             minimum_confidence=args.minimum_confidence,
