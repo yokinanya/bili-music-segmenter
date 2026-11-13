@@ -14,4 +14,3 @@ end_seconds 应包含该曲自然尾奏，直到歌曲结束或明确转入独�
 只输出 JSON：
 {"segments":[{"start_seconds":0.0,"end_seconds":120.0,"classification":"host_singing|background_music_chat|mixed_singing_and_chat|uncertain","confidence":0.0,"host_singing_present":true,"title_hint":"可明确听出的歌名，否则留空","announcer_hint":"主播报幕原话片段，否则留空","rationale":"简述人声归属和边界依据"}]}
 候选起点和终点均须位于实际输入音频范围内。没有可用音乐候选时 segments 返回空数组。"""
-
