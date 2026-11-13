@@ -50,7 +50,7 @@ def test_static_bootstrap_and_auth(server):
     status, body, _ = request(server, "GET", "/api/bootstrap")
     assert status == 200
     data = json.loads(body)
-    assert data["version"] == 3 and data["defaults"]["model_concurrency"] == 3
+    assert data["version"] == 3 and data["defaults"]["chunk_seconds"] == 1200
     assert "input_dir" not in data
     assert request(server, "GET", "/api/uploads", headers={"X-WebUI-Token": "wrong"})[0] == 403
     assert request(server, "GET", "/api/bootstrap?token=" + TOKEN, headers={"X-WebUI-Token": ""})[0] == 403

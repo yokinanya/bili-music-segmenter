@@ -15,7 +15,7 @@ from segment.music_agent.pipeline import execute_pipeline
 from segment.music_agent.pipeline_context import PipelineContext
 from segment.music_agent.pipeline_services import PipelineServices
 from segment.music_agent.recognition import deterministic_title_choice, recognize_audio
-from segment.music_agent.runtime import create_runtime
+from segment.music_agent.runtime import FIXED_BUDGETS, create_runtime
 from segment.music_agent.scan_gemini import scan_candidates
 from segment.workspace_options import default_options, validate_options
 from segment.workspace_store import DocumentStore
@@ -32,7 +32,7 @@ async def run_agent(media: Path, output_dir: Path, **settings) -> Path:
     config = load_config()
     output_dir.mkdir(parents=True, exist_ok=True)
     runtime = create_runtime(media, output_dir, {key: options[key] for key in default_options()})
-    runtime.config["media_threads"] = max(1, (os.cpu_count() or 1) // options["media_concurrency"])
+    runtime.config["media_threads"] = max(1, (os.cpu_count() or 1) // FIXED_BUDGETS["media"])
     store = DocumentStore(Path(runtime.config["state_dir"]) / "workspace.sqlite3")
     runtime.local_cache = LocalMediaCache(store, runtime.config)
     if options["use_shazam"]:
@@ -84,5 +84,5 @@ def _services(options: dict) -> PipelineServices:
             "extract_reference": extract_recognition_audio,
             "export": export_video,
         },
-        recognizer_budget=asyncio.Semaphore(options["recognizer_concurrency"]),
+        recognizer_budget=asyncio.Semaphore(FIXED_BUDGETS["recognizer"]),
     )

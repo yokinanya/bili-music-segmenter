@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import os
 from pathlib import Path
 
 from segment.logs import agent_log_path, configure_logging
@@ -21,10 +20,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--outdir", type=Path, required=True, help="切片与 manifest 输出目录")
     parser.add_argument("--netease-cookie", default="")
     parser.add_argument("--chunk-seconds", type=int, default=600)
-    parser.add_argument("--candidate-concurrency", type=int, default=3)
-    parser.add_argument("--model-concurrency", type=int, default=3)
-    parser.add_argument("--recognizer-concurrency", type=int, default=3)
-    parser.add_argument("--media-concurrency", type=int, default=min(2, os.cpu_count() or 1))
     parser.add_argument("--chunk-context", type=int, default=30)
     parser.add_argument("--minimum-candidate-seconds", type=float, default=30)
     parser.add_argument("--minimum-singing-seconds", type=float, default=30)
@@ -57,10 +52,6 @@ def main() -> None:
             args.media,
             args.outdir,
             chunk_seconds=args.chunk_seconds,
-            candidate_concurrency=args.candidate_concurrency,
-            model_concurrency=args.model_concurrency,
-            recognizer_concurrency=args.recognizer_concurrency,
-            media_concurrency=args.media_concurrency,
             chunk_context_seconds=args.chunk_context,
             minimum_candidate_seconds=args.minimum_candidate_seconds,
             minimum_singing_seconds=args.minimum_singing_seconds,

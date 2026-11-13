@@ -7,10 +7,6 @@ const FIELDS: { name: keyof RunOptions; label: string; step?: string; min?: stri
   { name: 'minimum_singing_seconds', label: '最短演唱 / 秒', min: '1' },
 ];
 const ADVANCED = [
-  ['candidate_concurrency', '候选并发'],
-  ['model_concurrency', '模型请求并发'], ['recognizer_concurrency', '识曲请求并发'],
-  ['media_concurrency', '媒体进程并发'],
-  ['chunk_seconds', '扫描块时长 / 秒'], ['chunk_context_seconds', '扫描上下文 / 秒'],
   ['minimum_candidate_seconds', '最短候选 / 秒'], ['recognizer_timeout', '识曲超时 / 秒'],
 ] as const;
 export function Parameters({ options, onChange }: { options: RunOptions; onChange: (value: RunOptions) => void }) {
@@ -20,8 +16,8 @@ export function Parameters({ options, onChange }: { options: RunOptions; onChang
     <Switch label="Shazam 识曲" checked={options.use_shazam} onChange={(value) => set('use_shazam', value)} />
     <Switch label="网易云识曲" checked={options.use_netease} onChange={(value) => set('use_netease', value)} />
     <Disclosure title="高级设置">
-      <p className="helper">并发决定同时运行的任务数量，不改变结果筛选标准。提高并发会增加内存、显存和网络占用，并可能触发服务限流。</p>
-      <div className="field-grid">{ADVANCED.map(([name, label]) => <Field key={name} label={label} value={options[name]} min={name.includes('context') ? '0' : '1'} onChange={(value) => set(name, value)} />)}</div>
+      <p className="helper">并发额度由后端固定，不随任务变化。识曲超时是全部采样点的整体时限。</p>
+      <div className="field-grid">{ADVANCED.map(([name, label]) => <Field key={name} label={label} value={options[name]} min="1" onChange={(value) => set(name, value)} />)}</div>
     </Disclosure>
   </section>;
 }

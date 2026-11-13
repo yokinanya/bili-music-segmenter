@@ -9,11 +9,7 @@ from dataclasses import asdict, dataclass, fields
 
 @dataclass(frozen=True)
 class RunOptions:
-    candidate_concurrency: int = 3
-    model_concurrency: int = 3
-    recognizer_concurrency: int = 3
-    media_concurrency: int = min(2, os.cpu_count() or 1)
-    chunk_seconds: int = 600
+    chunk_seconds: int = 1200
     chunk_context_seconds: int = 30
     minimum_candidate_seconds: float = 30
     minimum_singing_seconds: float = 30
@@ -32,7 +28,15 @@ NONNEGATIVE = {"chunk_context_seconds"}
 BOOLEAN_FIELDS = {"use_shazam", "use_netease"}
 FLOAT_FIELDS = {"minimum_candidate_seconds", "minimum_singing_seconds", "minimum_confidence"}
 RETIRED_OPTIONS = frozenset(
-    {"scan_concurrency", "upload_concurrency", "use_title_model", "boundary_context_seconds"}
+    {
+        "scan_concurrency",
+        "upload_concurrency",
+        "use_title_model",
+        "boundary_context_seconds",
+        "candidate_concurrency",
+        "model_concurrency",
+        "media_concurrency",
+    }
 )
 
 

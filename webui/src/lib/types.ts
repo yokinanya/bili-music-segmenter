@@ -3,8 +3,6 @@ export type StepState = JobState | 'waiting' | 'reused' | 'skipped' | 'retrying'
 export interface SourceAsset { id: string; name: string; size_bytes: number; state: 'pending' | 'uploading' | 'ready' | 'failed'; sha256: string; error: string | null; referenced?: boolean }
 export interface DraftFile { key: string; source?: SourceAsset; file?: File; name: string; size: number; sent: number; state: 'pending' | 'uploading' | 'ready' | 'failed' | 'cancelled'; error?: string }
 export interface RunOptions {
-  candidate_concurrency: number; model_concurrency: number;
-  recognizer_concurrency: number; media_concurrency: number;
   chunk_seconds: number; chunk_context_seconds: number;
   minimum_candidate_seconds: number; minimum_singing_seconds: number; minimum_confidence: number;
   use_shazam: boolean; use_netease: boolean;

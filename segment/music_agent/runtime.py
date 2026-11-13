@@ -22,6 +22,7 @@ from segment.workspace_uploads import now
 PROGRESS_PREFIX = "__MUSIC_AGENT_PROGRESS__"
 PIPELINE_VERSION = "workspace-1"
 PROGRESS_INTERVAL_SECONDS = 0.25
+FIXED_BUDGETS = {"model": 3, "recognizer": 3, "media": min(2, os.cpu_count() or 1)}
 HASH_BYTES = 1024 * 1024
 
 
@@ -57,10 +58,7 @@ class Runtime:
         self._sequence = 0
         self._steps: dict[str, dict] = {}
         self._stamps: dict[str, str] = {}
-        self._budgets = {
-            name: BoundedSemaphore(config["options"][name + "_concurrency"])
-            for name in ("model", "recognizer", "media")
-        }
+        self._budgets = {name: BoundedSemaphore(limit) for name, limit in FIXED_BUDGETS.items()}
 
     def advance(self, identity: str, label: str, total: int) -> None:
         with self._lock:

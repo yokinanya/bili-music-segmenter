@@ -15,6 +15,8 @@ from segment.music_agent.pipeline_context import PipelineContext
 from segment.music_agent.runtime import fingerprint
 from segment.music_agent.scan_gemini import Candidate
 
+CANDIDATE_CONCURRENCY = 3
+
 
 async def execute_pipeline(context: PipelineContext) -> Path:
     runtime = context.runtime
@@ -85,7 +87,7 @@ async def _scan(context: PipelineContext) -> tuple[list, list]:
 async def _parallel(items: list, work, context: PipelineContext):
     queued = iter(items)
     active = {}
-    for _ in range(context.options["candidate_concurrency"]):
+    for _ in range(CANDIDATE_CONCURRENCY):
         item = next(queued, None)
         if item is not None:
             active[asyncio.create_task(work(item))] = item
