@@ -14,6 +14,7 @@ from segment.music_agent.pipeline_candidates import prepare_candidate, recognize
 from segment.music_agent.pipeline_context import PipelineContext
 from segment.music_agent.runtime import fingerprint
 from segment.music_agent.scan_gemini import Candidate
+from segment.workspace_uploads import now
 
 CANDIDATE_CONCURRENCY = 3
 
@@ -30,9 +31,15 @@ async def execute_pipeline(context: PipelineContext) -> Path:
         candidates, chunks = await _scan(context)
         runtime.config["candidate_total"] = len(candidates)
         records: dict[int, dict] = {}
-        for identity, label in (("prepare", "候选处理"), ("finalize", "切分与导出")):
+        counters = (("prepare", "候选处理"), ("finalize", "切分与导出"))
+        for identity, label in counters:
             runtime.event(
-                identity, label, total=len(candidates), unit="项", state="running" if candidates else "skipped"
+                identity,
+                label,
+                total=len(candidates),
+                unit="项",
+                state="running" if candidates else "skipped",
+                finished_at=None if candidates else now(),
             )
         manifest = context.output / f"{context.media.stem}_music_agent.json"
 
@@ -40,18 +47,43 @@ async def execute_pipeline(context: PipelineContext) -> Path:
             _persist(context, manifest, chunks, list(records.values()))
 
         persist()
-        async for candidate, result in _parallel(candidates, lambda item: prepare_candidate(item, context), context):
-            records[candidate.index] = result
-            runtime.advance("prepare", "候选处理", len(candidates))
-            persist()
+        try:
+            async for candidate, result in _parallel(
+                candidates, lambda item: prepare_candidate(item, context), context
+            ):
+                records[candidate.index] = result
+                runtime.advance("prepare", "候选处理", len(candidates))
+                persist()
+        except Exception as error:
+            if candidates:
+                _finish(runtime, counters[0], failed=error)
+            raise
+        if candidates:
+            _finish(runtime, counters[0])
         ordered = sorted(records.values(), key=lambda item: item["index"])
-        async for finalized in _finalize(ordered, context):
-            records = {record["index"]: record for record in finalized}
-            persist()
+        try:
+            async for finalized in _finalize(ordered, context):
+                records = {record["index"]: record for record in finalized}
+                persist()
+        except Exception as error:
+            if candidates:
+                _finish(runtime, counters[1], failed=error)
+            raise
+        if candidates:
+            _finish(runtime, counters[1])
         persist()
         remove_superseded_exports(context.output, list(records.values()))
         runtime.event("complete", "结果整理", state="succeeded", completed=1, total=1)
         return manifest
+
+
+def _finish(runtime, counter: tuple[str, str], failed: Exception | None = None) -> None:
+    """计数步骤只靠 advance 累加 completed，必须补终态，否则界面永远显示进行中。"""
+    identity, label = counter
+    if failed is None:
+        runtime.event(identity, label, state="succeeded", finished_at=now())
+    else:
+        runtime.event(identity, label, state="failed", error=str(failed), finished_at=now())
 
 
 async def _finalize(ordered: list, context: PipelineContext):

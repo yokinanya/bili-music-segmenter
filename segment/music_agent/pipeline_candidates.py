@@ -25,18 +25,16 @@ async def _prepare(candidate, context: PipelineContext) -> dict:
         return {**record, "decision": "background_music_skipped"}
     if candidate.classification == "uncertain" or candidate.confidence < context.options["minimum_confidence"]:
         return {**record, "decision": "uncertain_or_low_confidence_skipped"}
-    # 扫描已直接给出完整歌曲边界，这里不再逐候选精修；仅在发现疑点时由全场审核触发复核。
-    prepared = []
-    for start, end in [(candidate.start, candidate.end)]:
-        if end - start < context.options["minimum_singing_seconds"]:
-            continue
-        interval = {"start_seconds": start, "end_seconds": end, "duration_seconds": round(end - start, 3)}
-        metadata = await recognize_interval(interval, context, candidate)
-        prepared.append({**interval, **metadata})
+    # 扫描已直接给出完整歌曲边界，不再逐候选精修。
+    start, end = candidate.start, candidate.end
+    if end - start < context.options["minimum_singing_seconds"]:
+        return {**record, "decision": "no_confident_singing"}
+    interval = {"start_seconds": start, "end_seconds": end, "duration_seconds": round(end - start, 3)}
+    metadata = await recognize_interval(interval, context, candidate)
     return {
         **record,
-        "singing_intervals": prepared,
-        "decision": "prepared" if prepared else "no_confident_singing",
+        "singing_intervals": [{**interval, **metadata}],
+        "decision": "prepared",
     }
 
 

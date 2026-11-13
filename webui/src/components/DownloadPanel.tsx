@@ -40,7 +40,7 @@ export function DownloadPanel(props: DownloadPanelProps) {
     <div className="input-scroll">
       <section aria-labelledby="download-title"><div className="section-head"><h2 id="download-title">链接下载</h2></div>
         <TextField label="视频链接" type="url" required pattern="https?://.+" value={url} disabled={busy} onChange={onUrlChange} />
-        <p className="helper">请输入完整的 HTTP 或 HTTPS 视频链接。</p>
+        <p className="helper">填完整链接，以 http:// 或 https:// 开头。</p>
         <Disclosure title={`下载 Cookie${cookie ? ' · 已填入' : '（可选）'}`}>
           <TextField label="Cookie 或 cookies.txt 内容" type="textarea" rows={3} value={cookie} disabled={busy} autocomplete="off" onChange={setCookie} />
           <input hidden ref={cookieFile} type="file" accept=".txt" disabled={busy} onChange={(event) => {
@@ -50,7 +50,7 @@ export function DownloadPanel(props: DownloadPanelProps) {
             <Button type="button" variant="outlined" disabled={busy} onClick={() => cookieFile.current?.click()}><Icon name="upload" />导入 cookies.txt</Button>
             <Button type="button" variant="text" disabled={busy || !cookie} onClick={() => setCookie('')}>清空 Cookie</Button>
           </div>
-          <p className="helper">Cookie 随源文件保留以便续跑，删除任务时清理。浏览器不保存 Cookie。</p>
+          <p className="helper">Cookie 只存在服务端，用于续跑，删除任务时清除。</p>
         </Disclosure>
       </section>
       {children}

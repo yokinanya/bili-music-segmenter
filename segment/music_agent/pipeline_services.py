@@ -11,6 +11,7 @@ from dataclasses import dataclass
 class PipelineServices:
     calls: dict[str, Callable]
     recognizer_budget: asyncio.Semaphore
+    netease_budget: asyncio.Semaphore | None = None
 
     async def recognize(self, audio, context):
         return await self.calls["recognize"](
@@ -20,6 +21,7 @@ class PipelineServices:
             use_shazam=context.options["use_shazam"],
             use_netease=context.options["use_netease"],
             budget=self.recognizer_budget,
+            netease_budget=self.netease_budget,
         )
 
     def choose_title(self, recognition):

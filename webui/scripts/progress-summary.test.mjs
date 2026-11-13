@@ -216,3 +216,47 @@ test('derivation leaves frozen input records unchanged', () => {
   summarizeProgress({ item: video, job: task });
   assert.equal(JSON.stringify({ video, task }), before);
 });
+
+test('path collapses an ancestor that repeats its child label', () => {
+  const result = summarize([
+    step({ id: 'finalize', label: '切分与导出', total: 3, unit: '项', sequence: 500 }),
+    step({ id: 'export/1', parent_id: 'finalize', label: '导出片段', sequence: 5 }),
+    step({ id: 'ffmpeg', parent_id: 'export/1', label: '导出片段', completed: 72, total: 141, unit: '秒', sequence: 6 }),
+  ]);
+  // 父子同名时只显示一次，不出现「导出片段 · 导出片段」。
+  assert.equal(result.path, '切分与导出 · 导出片段');
+});
+
+test('counter prefix is empty when the path already names the step', () => {
+  const result = summarize([
+    step({ id: 'finalize', label: '切分与导出', total: 3, unit: '项', sequence: 500 }),
+    step({ id: 'export/1', parent_id: 'finalize', label: '导出片段', sequence: 5 }),
+    step({ id: 'ffmpeg', parent_id: 'export/1', label: '导出片段', completed: 72, total: 141, unit: '秒', sequence: 6 }),
+  ]);
+  assert.equal(result.counterPrefix, '');
+});
+
+test('counter prefix names the step when the path omits it', () => {
+  const result = summarize([
+    step({ completed: 3, total: 10, unit: '项', sequence: 100 }),
+    step({ id: 'scan/4', parent_id: 'scan', label: '扫描分块 4', sequence: 2 }),
+  ]);
+  assert.equal(result.path, '分块扫描 · 扫描分块 4');
+  // 计数器取自祖先的聚合总量，路径里已经有该标签，不再重复。
+  assert.equal(result.counterPrefix, '');
+});
+
+test('path is empty when nothing is running', () => {
+  const result = summarize([]);
+  assert.equal(result.path, '');
+  assert.equal(result.counterPrefix, '');
+});
+
+test('counter prefix hides when the aggregate step is already on the path', () => {
+  const result = summarize([
+    step({ id: 'finalize', label: '切分与导出', completed: 1, total: 3, unit: '项', sequence: 500 }),
+    step({ id: 'export/1', parent_id: 'finalize', label: '导出片段', sequence: 5 }),
+  ]);
+  assert.equal(result.path, '切分与导出 · 导出片段');
+  assert.equal(result.counterPrefix, '');
+});

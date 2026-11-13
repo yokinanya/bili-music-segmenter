@@ -75,10 +75,26 @@ function currentWork(details: readonly StepDetail[], attempt: number) {
   return { current, parallelCount: Math.max(0, leaves.length - 1) };
 }
 
+/** 父步骤与子步骤同名时只保留一次，避免「导出片段 · 导出片段」。 */
+function pathOf(current: StepDetail | null): string {
+  if (!current) return '';
+  const labels = [...current.ancestors].reverse().map((parent) => parent.label);
+  labels.push(current.step.label);
+  return labels.filter((label, index) => label && label !== labels[index - 1]).join(' · ');
+}
+
+/** 计数器只在路径没有提到该标签时补前缀，否则同一行会重复同一步骤名。 */
+function prefixOf(measurement: ProgressMeasurement | null, path: string): string {
+  if (!measurement) return '';
+  // 按路径分段精确比较：子串判断会让「片段」命中「导出片段」。
+  return path.split(' · ').includes(measurement.label) ? '' : `${measurement.label} · `;
+}
+
 function runningProgress(details: readonly StepDetail[], attempt: number) {
   const { current, parallelCount } = currentWork(details, attempt);
   const measurement = current ? measurementOf([current.step, ...current.ancestors]) : null;
-  return { current, parallelCount, measurement };
+  const path = pathOf(current);
+  return { current, parallelCount, measurement, path, counterPrefix: prefixOf(measurement, path) };
 }
 
 function progressIssues({ job, item, details }: {
@@ -111,7 +127,7 @@ export function summarizeProgress({ job, item }: { readonly job: ProgressJob; re
   const running = state === 'running';
   const progress = running
     ? runningProgress(details, job.attempt)
-    : { current: null, parallelCount: 0, measurement: null };
+    : { current: null, parallelCount: 0, measurement: null, path: '', counterPrefix: '' };
   return {
     state,
     running,
@@ -131,3 +147,4 @@ export function summarizeBatch(batch: readonly BatchItem[]) {
       .filter(({ count }) => count > 0),
   };
 }
+

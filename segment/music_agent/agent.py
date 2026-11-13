@@ -85,4 +85,5 @@ def _services(options: dict) -> PipelineServices:
             "export": export_video,
         },
         recognizer_budget=asyncio.Semaphore(FIXED_BUDGETS["recognizer"]),
+        netease_budget=asyncio.Semaphore(FIXED_BUDGETS["netease"]),
     )

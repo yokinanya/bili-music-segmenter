@@ -37,8 +37,12 @@ async def recognize_audio(
     use_shazam: bool = True,
     use_netease: bool = True,
     budget: asyncio.Semaphore | None = None,
+    netease_budget: asyncio.Semaphore | None = None,
 ) -> dict[str, Any]:
-    """Query both recognizers concurrently, so one slow provider does not double the per-interval wait."""
+    """Query both recognizers concurrently, so one slow provider does not double the per-interval wait.
+
+    网易云对上游更敏感，可以用更低的独立额度；未提供时退回共享额度。
+    """
     runners = {}
     if use_shazam:
         runners["shazam"] = _run_shazam
@@ -56,11 +60,12 @@ async def recognize_audio(
                     raise RuntimeError(result["error"])
                 return result
 
-            if budget is None:
+            limit = netease_budget if provider == "netease" and netease_budget is not None else budget
+            if limit is None:
                 return await call()
             if scope:
                 scope.runtime.event(identity, f"{provider} 识曲", state="waiting")
-            async with budget:
+            async with limit:
                 if scope:
                     scope.runtime.event(identity, f"{provider} 识曲", state="running")
                 return await call()
@@ -116,7 +121,7 @@ def _netease_blocking(audio: str, cookie: str, timeout: int) -> dict[str, Any]:
 
 
 def netease_outcome(error: BaseException) -> dict[str, Any]:
-    """不同起点识别到不同作品时标记 conflict 交给标题裁决，不能静默采用其中一个。"""
+    """不同起点识别到不同作品时标记 conflict 交给人工选择，不能静默采用其中一个。"""
     if isinstance(error, NetEaseDisagreement):
         return {"status": "conflict", "error": str(error), "samples": [list(item) for item in error.groups]}
     if isinstance(error, NetEaseNoMatch):

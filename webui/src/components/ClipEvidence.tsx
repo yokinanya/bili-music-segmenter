@@ -3,7 +3,7 @@ import type { Clip } from '@/lib/types';
 import { Disclosure } from './Disclosure';
 
 export function ClipEvidence({ clip }: { readonly clip: Clip }) {
-  return <Disclosure title="识别与复核依据">
+  return <Disclosure title="识曲依据">
     <dl className="clip-evidence-summary">
       {clipEvidence(clip.recognition, clip.title_resolution).map((row, index) =>
         <div key={`${row.label}-${index}`}><dt>{row.label}</dt><dd>{row.text}</dd></div>)}

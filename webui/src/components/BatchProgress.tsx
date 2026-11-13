@@ -47,24 +47,23 @@ export function VideoProgress({ item, job }: { item: BatchItem; job: JobStatus }
 }
 
 function CurrentProgress({ summary }: { summary: ReturnType<typeof summarizeProgress> }) {
-  const { current, measurement } = summary;
-  const parent = current?.ancestors[0];
-  const currentLabel = current && [parent?.label, current.step.label].filter(Boolean).join(' · ');
+  const { current, measurement, path, counterPrefix } = summary;
   const counter = currentCounter(summary);
   return <div className="current-progress">
-    <p className="current-work" aria-live="polite">{currentLabel}</p>
-    <CurrentMeasurement running={summary.running} measurement={measurement} label={counter || currentLabel || '视频处理进度'} />
+    <p className="current-work" aria-live="polite">{path}</p>
+    <CurrentMeasurement running={summary.running} measurement={measurement}
+      label={counter ? `${path} ${counter}` : path || '视频处理进度'} />
     {counter && <p className="progress-counter">{counter}</p>}
-    {summary.parallelCount > 0 && <p className="muted">另有 {summary.parallelCount} 项处理中</p>}
+    {summary.parallelCount > 0 && <p className="muted">同时还有 {summary.parallelCount} 项在处理</p>}
     {current?.step.message && <p className="muted progress-message">{current.step.message}</p>}
   </div>;
 }
 
-function currentCounter({ measurement, current }: Pick<ReturnType<typeof summarizeProgress>, 'measurement' | 'current'>) {
+function currentCounter({ measurement, current, counterPrefix }: ReturnType<typeof summarizeProgress>) {
   const counterStep = measurement ?? current?.step;
   if (!counterStep) return '';
   const count = progressCounter(counterStep);
-  return count ? `${counterStep.label} · ${count}` : '';
+  return count ? `${counterPrefix}${count}` : '';
 }
 
 function CurrentMeasurement({ running, measurement, label }: {

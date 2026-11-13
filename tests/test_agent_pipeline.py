@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -86,3 +87,174 @@ def test_zero_candidates_still_produces_manifest(tmp_path, monkeypatch, pipeline
     media.touch()
     path = asyncio.run(agent.run_agent(media, tmp_path / "out"))
     assert json.loads(path.read_text())["exported_count"] == 0
+
+
+def test_prepare_and_finalize_reach_terminal_state(monkeypatch, tmp_path):
+    """计数步骤必须落到终态；只累加 completed 会让界面永远显示进行中。"""
+    import asyncio
+
+    from segment.music_agent.pipeline import execute_pipeline
+
+    events = []
+
+    class Runtime:
+        def __init__(self):
+            self.config = {
+                "checkpoint_dir": str(tmp_path / "cp"),
+                "source_digest": "d",
+                "attempt": 1,
+                "owner": "o",
+                "state_dir": str(tmp_path),
+            }
+            self._steps = {}
+
+        def event(self, identity, label, **changes):
+            event = {**self._steps.get(identity, {}), **changes}
+            event.setdefault("completed", 0)
+            event.setdefault("total", None)
+            event["id"], event["label"] = identity, label
+            self._steps[identity] = event
+            events.append(dict(event))
+
+        def advance(self, identity, label, total):
+            self.event(identity, label, completed=self._steps[identity]["completed"] + 1, total=total)
+
+        def run(self, spec, work):
+            return work()
+
+        async def async_run(self, spec, work):
+            return await work()
+
+        def activate(self, identity=""):
+            from contextlib import nullcontext
+
+            return nullcontext()
+
+        def resource(self, name):
+            from contextlib import nullcontext
+
+            return nullcontext()
+
+    services = SimpleNamespace(
+        calls={
+            "duration": lambda path: 100.0,
+            "scan": lambda *a, **k: ([], []),
+            "recognize": None,
+            "choose_title": None,
+            "extract_reference": None,
+            "export": None,
+        },
+        recognize=None,
+    )
+    context = SimpleNamespace(
+        media=tmp_path / "a.mp4",
+        output=tmp_path,
+        options={
+            "chunk_seconds": 1200,
+            "chunk_context_seconds": 30,
+            "minimum_candidate_seconds": 30,
+            "audio_model": "m",
+            "netease_cookie": "",
+        },
+        services=services,
+        runtime=Runtime(),
+        client=None,
+        spec=lambda identity, label, payload: {"id": identity, "label": label, "input": payload},
+    )
+    asyncio.run(execute_pipeline(context))
+    prepare = [event for event in events if event["id"] == "prepare"]
+    finalize = [event for event in events if event["id"] == "finalize"]
+    # 候选为 0 时是 skipped，但同样要有终态时间戳。
+    assert prepare[-1]["state"] == "skipped" and prepare[-1].get("finished_at")
+    assert finalize[-1]["state"] == "skipped" and finalize[-1].get("finished_at")
+
+
+def test_prepare_step_marks_failure(monkeypatch, tmp_path):
+    """候选处理抛错时，计数步骤必须是 failed 并带上错误，不能停在 running。"""
+    from segment.music_agent.pipeline import execute_pipeline
+
+    events = {}
+
+    class Runtime:
+        def __init__(self):
+            self.config = {
+                "checkpoint_dir": str(tmp_path / "cp"),
+                "source_digest": "d",
+                "attempt": 1,
+                "owner": "o",
+                "state_dir": str(tmp_path),
+            }
+            self._steps = {}
+
+        def event(self, identity, label, **changes):
+            event = {**self._steps.get(identity, {}), **changes}
+            event.setdefault("completed", 0)
+            event.setdefault("total", None)
+            event["id"], event["label"] = identity, label
+            self._steps[identity] = event
+            events[identity] = dict(event)
+
+        def advance(self, identity, label, total):
+            self.event(identity, label, completed=self._steps[identity]["completed"] + 1, total=total)
+
+        def run(self, spec, work):
+            return work()
+
+        async def async_run(self, spec, work):
+            return await work()
+
+        def activate(self, identity=""):
+            from contextlib import nullcontext
+
+            return nullcontext()
+
+        def resource(self, name):
+            from contextlib import nullcontext
+
+            return nullcontext()
+
+    candidate = Candidate(
+        index=1,
+        start=10.0,
+        end=200.0,
+        classification="host_singing",
+        confidence=0.95,
+        host_singing_present=True,
+        title_hint="a",
+        rationale="r",
+    )
+    services = SimpleNamespace(
+        calls={
+            "duration": lambda path: 100.0,
+            "scan": lambda *a, **k: ([candidate], []),
+            "recognize": None,
+            "choose_title": None,
+            "extract_reference": None,
+            "export": None,
+        },
+    )
+    context = SimpleNamespace(
+        media=tmp_path / "a.mp4",
+        output=tmp_path,
+        options={
+            "chunk_seconds": 1200,
+            "chunk_context_seconds": 30,
+            "minimum_candidate_seconds": 30,
+            "audio_model": "m",
+            "netease_cookie": "",
+        },
+        services=services,
+        runtime=Runtime(),
+        client=None,
+        spec=lambda identity, label, payload: {"id": identity, "label": label, "input": payload},
+    )
+
+    async def boom(item, ctx):
+        raise RuntimeError("识曲失败")
+
+    monkeypatch.setattr("segment.music_agent.pipeline.prepare_candidate", boom)
+    with pytest.raises(RuntimeError, match="识曲失败"):
+        asyncio.run(execute_pipeline(context))
+    assert events["prepare"]["state"] == "failed"
+    assert "识曲失败" in events["prepare"]["error"]
+    assert events["prepare"]["finished_at"]

@@ -31,9 +31,9 @@ export function ClipEditor({ jobId, clip, onClose, onSaved }: Props) {
   };
   return <MaterialDialog open title="编辑片段" dismissible={!busy} onClose={() => { if (!busy) onClose(); }}>
     <form ref={form} className="clip-editor" onSubmit={(event) => { event.preventDefault(); void save(); }}>
-      <p className="helper">时间以原视频为基准，单位为秒。仅修改歌名或歌手时直接保存，修改时间范围后重新导出。</p>
+      <p className="helper">时间是原视频里的秒数。只改歌名或歌手会直接保存；改了时间会重新导出片段。</p>
       {candidates.length > 0 && <div className="title-candidates"><p className="helper">
-        {candidates.length > 1 ? '识曲结果不一致，请选择正确歌名或手动填写：' : '识曲候选：'}</p>
+        {candidates.length > 1 ? '两个识曲结果不一样，请选一个或自己填：' : '识曲结果：'}</p>
         <div className="title-candidate-list">{candidates.map((item) =>
           <Button key={`${item.title}-${item.sources.join()}`} variant="text" disabled={busy}
             onClick={() => pick(item.title, item.artist)}>{item.title}

@@ -16,7 +16,7 @@ export function Parameters({ options, onChange }: { options: RunOptions; onChang
     <Switch label="Shazam 识曲" checked={options.use_shazam} onChange={(value) => set('use_shazam', value)} />
     <Switch label="网易云识曲" checked={options.use_netease} onChange={(value) => set('use_netease', value)} />
     <Disclosure title="高级设置">
-      <p className="helper">并发额度由后端固定，不随任务变化。识曲超时是全部采样点的整体时限。</p>
+      <p className="helper">下面两项一般不用改。识曲超时是整首歌所有采样点的总时限。</p>
       <div className="field-grid">{ADVANCED.map(([name, label]) => <Field key={name} label={label} value={options[name]} min="1" onChange={(value) => set(name, value)} />)}</div>
     </Disclosure>
   </section>;

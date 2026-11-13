@@ -169,3 +169,29 @@ def test_single_sample_timeout_is_clipped_to_remaining_deadline(monkeypatch):
     )
     # 第一点 60 秒，第二点剩余 60 秒，第三点只剩 20 秒。
     assert limits == [60, 60, 20]
+
+
+def test_transient_error_on_one_sample_does_not_fail_the_song(monkeypatch):
+    """单点网络抖动或子进程失败不能毁掉整首歌：其余采样点仍然正常投票。"""
+
+    def fake_match(audio_fp, *, duration, cookie, timeout):
+        if audio_fp.endswith("-12"):
+            raise RuntimeError("网易云音频匹配失败：fetch failed")
+        return {"name": "天黑黑", "artist": "孙燕姿"}
+
+    monkeypatch.setattr(netease, "generate_audio_fp", lambda file, offset: f"fp-{offset}")
+    monkeypatch.setattr(netease, "_post_audio_match", fake_match)
+    match = netease._recognize_with_offsets("a.mp3", duration=200, cookie="", offsets=netease.AFP_OFFSETS, timeout=5)
+    assert match["name"] == "天黑黑"
+
+
+def test_all_samples_failing_raises_the_real_error(monkeypatch):
+    """所有采样点都失败时才报错，并且要带上真实原因。"""
+
+    def fake_match(*args, **kwargs):
+        raise RuntimeError("网易云音频匹配失败：NetEase audio match HTTP 403")
+
+    monkeypatch.setattr(netease, "generate_audio_fp", lambda file, offset: f"fp-{offset}")
+    monkeypatch.setattr(netease, "_post_audio_match", fake_match)
+    with pytest.raises(RuntimeError, match="HTTP 403"):
+        netease._recognize_with_offsets("a.mp3", duration=200, cookie="", offsets=netease.AFP_OFFSETS, timeout=5)

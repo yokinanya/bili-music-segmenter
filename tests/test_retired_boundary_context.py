@@ -55,4 +55,62 @@ def test_webui_exposes_only_task_decisions() -> None:
 def test_runtime_budgets_are_fixed() -> None:
     from segment.music_agent.runtime import FIXED_BUDGETS
 
-    assert FIXED_BUDGETS == {"model": 3, "recognizer": 3, "media": min(2, os.cpu_count() or 1)}
+    # 识曲额度降低到 2：网易云上游对高并发敏感，一次请求失败会使整首歌无法识别。
+    assert FIXED_BUDGETS == {
+        "model": 3,
+        "recognizer": 2,
+        "netease": 1,
+        "media": min(2, os.cpu_count() or 1),
+    }
+
+
+def test_netease_has_its_own_lower_budget() -> None:
+    """网易云上游对并发敏感，且单次识别内部已串行采样四点，必须比 Shazam 额度低。"""
+    from segment.music_agent.runtime import FIXED_BUDGETS
+
+    assert FIXED_BUDGETS["netease"] == 1
+    assert FIXED_BUDGETS["netease"] < FIXED_BUDGETS["recognizer"]
+
+
+def test_netease_budget_limits_only_netease(monkeypatch) -> None:
+    """网易云走专属额度，Shazam 仍用共享额度。"""
+    import asyncio
+
+    from segment.music_agent import recognition
+
+    seen = []
+
+    class Tracking(asyncio.Semaphore):
+        def __init__(self, value, name):
+            super().__init__(value)
+            self.name = name
+
+        async def __aenter__(self):
+            seen.append(self.name)
+            return await super().__aenter__()
+
+    async def fake_shazam(audio, timeout):
+        return {"status": "matched", "title": "歌", "artist": "人"}
+
+    async def fake_netease(audio, timeout):
+        return {"status": "matched", "title": "歌", "artist": "人"}
+
+    async def run():
+        return await recognition.recognize_audio(
+            Path("a.mp3"),
+            use_shazam=True,
+            use_netease=True,
+            budget=Tracking(3, "shared"),
+            netease_budget=Tracking(1, "netease"),
+        )
+
+    monkeypatch.setattr(recognition, "_run_shazam", fake_shazam)
+
+    async def to_thread(fn, *args):
+        return fn(*args)
+
+    monkeypatch.setattr(recognition.asyncio, "to_thread", to_thread)
+    monkeypatch.setattr(recognition, "netease_orig", lambda *a, **k: (["歌", "人"], {"name": "歌"}))
+    result = asyncio.run(run())
+    assert result["shazam"]["status"] == "matched" and result["netease"]["status"] == "matched"
+    assert sorted(seen) == ["netease", "shared"]

@@ -19,7 +19,7 @@ export function UsagePanel({ session, job }: { session: UsageSnapshot | null; jo
         {!usage?.models.length && <p className="empty small-empty">{scope === '选中任务' && !job ? '选择任务以查看模型明细' : '暂无模型调用'}</p>}
         <ModelTable label={scope} usage={usage} />
       </Disclosure>
-      <p className="helper">费用为估算，不含 S3；实际费用以服务商账单为准。</p>
+      <p className="helper">费用按官方价估算，实际以服务商账单为准。</p>
     </section>
   </>;
 }

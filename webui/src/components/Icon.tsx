@@ -5,6 +5,7 @@ const paths = {
   upload: 'M12 16V3m-5 5 5-5 5 5M4 15v5h16v-5',
   play: 'm9 5 11 7-11 7z', close: 'm6 6 12 12M6 18 18 6',
   up: 'm6 15 6-6 6 6', down: 'm6 9 6 6 6-6',
+  edit: 'M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16zM14 6l4 4',
   retry: 'M20 7v5h-5m5 0a8 8 0 1 0-2 6',
   download: 'M12 3v13m-5-5 5 5 5-5M4 17v4h16v-4',
   music: 'M9 17V5l11-2v12M9 9l11-2M9 17a3 3 0 1 1-3-3h3m11 1a3 3 0 1 1-3-3h3',

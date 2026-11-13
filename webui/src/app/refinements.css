@@ -6,7 +6,6 @@ form.download-panel > .pane-footer > .btn { width: 100%; }
 .task-details dd { margin: 0; overflow-wrap: anywhere; }
 .history-filters { display: grid; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--md-sys-color-outline-variant); }
 .clip-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.clip-metadata { font-size: 13px; overflow-wrap: anywhere; }
 .clip-editor { display: flex; flex-direction: column; gap: 16px; }
 .clip-editor .field-grid { margin: 0; }
 .clip-evidence { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
@@ -23,4 +22,3 @@ h1, h2, h3 { text-wrap: balance; }
 .task-sources { padding-left: 20px; overflow-wrap: anywhere; }
 .source-url { overflow-wrap: anywhere; font-size: 12px; }
 .clip-editor input { display: block; width: 100%; color: inherit; background: var(--md-sys-color-surface-container-low); border: 1px solid var(--md-sys-color-outline); border-radius: 8px; padding: 12px; }
-.clip-actions { margin-block: 12px; }

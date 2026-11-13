@@ -22,7 +22,13 @@ from segment.workspace_uploads import now
 PROGRESS_PREFIX = "__MUSIC_AGENT_PROGRESS__"
 PIPELINE_VERSION = "workspace-1"
 PROGRESS_INTERVAL_SECONDS = 0.25
-FIXED_BUDGETS = {"model": 3, "recognizer": 3, "media": min(2, os.cpu_count() or 1)}
+FIXED_BUDGETS = {
+    "model": 3,
+    "recognizer": 2,
+    # 网易云多采样串行请求同一上游，比 Shazam 更容易触发限流，单独再降一档。
+    "netease": 1,
+    "media": min(2, os.cpu_count() or 1),
+}
 HASH_BYTES = 1024 * 1024
 
 

@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import pprint
 import re
@@ -108,7 +109,7 @@ def normalize_song_text(value):
 
 
 def vote_match(matches):
-    """得票最多者胜出；平票无法判断时返回 None，交给标题裁决。"""
+    """得票最多者胜出；平票无法判断时返回 None，交给人工在界面选择。"""
     tally = {}
     for match in matches:
         key = netease_match_key(match)
@@ -192,43 +193,69 @@ def _recognize_with_offsets(file, *, duration, cookie, offsets, timeout, deadlin
     points = sample_offsets(duration, offsets)
     if not points:
         raise ValueError(f"识曲音频 {duration:.1f} 秒短于一个 {AFP_DURATION} 秒采样窗口")
-    matches, failures, collected = [], [], []
+    matches, collected, reasons = [], [], []
+    errors: list[Exception] = []
     started = time.monotonic()
     for index, point in enumerate(points):
         # 单点超时不是总时限：按剩余时间裁剪，用尽后跳过剩余采样点，沿用已有多数结果。
         remaining = None if deadline is None else deadline - (time.monotonic() - started)
         if remaining is not None and remaining <= 0:
-            failures.append(f"skipped {len(points) - index} samples: deadline={deadline:.0f}s")
+            reasons.append(f"skipped {len(points) - index} samples: deadline={deadline:.0f}s")
             break
         limit = timeout if remaining is None else min(timeout, remaining)
         try:
             audio_fp = generate_audio_fp(file, point)
             match = _post_audio_match(audio_fp, duration=AFP_DURATION, cookie=cookie, timeout=limit)
         except NetEaseNoMatch as error:
-            failures.append(f"offset={point}: {error}")
+            reasons.append(f"offset={point}: {error}")
+            continue
+        except Exception as error:
+            # 单点网络抖动或子进程失败不能毁掉整首歌，其余采样点仍可投票。
+            errors.append(error)
+            reasons.append(f"offset={point}: {type(error).__name__}: {error}")
             continue
         matches.append(match)
         collected.append((point, *netease_title(match)))
-    # 不同起点可能听到不同录音，按多数决取一致的候选；平票交由标题裁决，不替模型挑一个。
+    # 不同起点可能听到不同录音，按多数决取一致的候选；平票标记冲突，交给人工选择。
     winner = vote_match(matches)
     if winner is None:
         if matches:
             raise NetEaseDisagreement(collected)
-        raise NetEaseNoMatch("; ".join(failures))
+        if errors:
+            raise RuntimeError("；".join(reasons)) from errors[0]
+        raise NetEaseNoMatch("; ".join(reasons))
     return winner
 
 
 def _post_audio_match(audio_fp, *, duration, cookie, timeout):
-    result = subprocess.run(
-        ["node", MATCH_SCRIPT],
-        input=json.dumps({"audioFP": audio_fp, "duration": duration, "cookie": cookie, "timeout": timeout}),
-        check=True,
-        text=True,
-        encoding="utf-8",
-        capture_output=True,
-        timeout=timeout,
+    # 整体时限裁剪会产生小数秒，而 Node 的 AbortSignal.timeout 只接受整数毫秒。
+    seconds = max(1, math.ceil(timeout))
+    result = _run_node(
+        [MATCH_SCRIPT],
+        input=json.dumps({"audioFP": audio_fp, "duration": duration, "cookie": cookie, "timeout": seconds}),
+        what="网易云音频匹配",
+        timeout=seconds,
     )
     return _extract_match(json.loads(result.stdout))
+
+
+def _run_node(args, *, input=None, what, timeout=None):
+    """Node 子进程失败时带上它自己的 stderr；单独的命令行和退出码对用户没有意义。"""
+    try:
+        return subprocess.run(
+            ["node", *args],
+            input=input,
+            check=True,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=timeout,
+        )
+    except subprocess.CalledProcessError as error:
+        detail = (error.stderr or "").strip().splitlines()
+        raise RuntimeError(f"{what}失败：{detail[-1] if detail else f'退出码 {error.returncode}'}") from error
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError(f"{what}超时：{timeout} 秒内未返回") from error
 
 
 def _extract_pcm(file, pcm_path, offset):
@@ -260,13 +287,7 @@ def _extract_pcm(file, pcm_path, offset):
 
 
 def _run_afp_generator(pcm_path):
-    result = subprocess.run(
-        ["node", AFP_GENERATOR, pcm_path],
-        check=True,
-        text=True,
-        encoding="utf-8",
-        capture_output=True,
-    )
+    result = _run_node([AFP_GENERATOR, pcm_path], what="网易云指纹生成")
     output = result.stdout.strip().splitlines()
     if not output:
         raise ValueError("NetEase AFP generator returned empty audioFP")
