@@ -89,7 +89,7 @@ def test_netease_budget_limits_only_netease(monkeypatch) -> None:
             seen.append(self.name)
             return await super().__aenter__()
 
-    async def fake_shazam(audio, timeout):
+    async def fake_shazam(audio, timeout, proxy=None):
         return {"status": "matched", "title": "歌", "artist": "人"}
 
     async def fake_netease(audio, timeout):

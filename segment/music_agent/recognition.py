@@ -11,7 +11,7 @@ from opencc import OpenCC
 
 from segment.music_agent.runtime import CURRENT, fingerprint
 from segment.netease import NetEaseDisagreement, NetEaseNoMatch, netease_orig, variant_free
-from segment.shazam import parse_shazam_response, shazam_orig, shazam_title
+from segment.shazam import create_client, parse_shazam_response, shazam_title
 
 # 网易云改为多采样点投票后，旧缓存里的单点结果不能复用。
 NETEASE_VOTE_VERSION = "netease-vote-v1"
@@ -38,6 +38,7 @@ async def recognize_audio(
     use_netease: bool = True,
     budget: asyncio.Semaphore | None = None,
     netease_budget: asyncio.Semaphore | None = None,
+    shazam_proxy: str | None = None,
 ) -> dict[str, Any]:
     """Query both recognizers concurrently, so one slow provider does not double the per-interval wait.
 
@@ -45,17 +46,19 @@ async def recognize_audio(
     """
     runners = {}
     if use_shazam:
-        runners["shazam"] = _run_shazam
+        runners["shazam"] = lambda: _run_shazam(str(audio), timeout, shazam_proxy)
     if use_netease:
         runners["netease"] = lambda: asyncio.to_thread(_netease_blocking, str(audio), netease_cookie, timeout)
 
     async def invoke(provider, run):
         scope = CURRENT.get()
-        identity = "recognition/" + fingerprint([str(audio), provider])
+        # Shazam 走代理时，同一段音频的直连缓存结果不能复用。
+        identity_key = [str(audio), provider] + ([shazam_proxy] if provider == "shazam" else [])
+        identity = "recognition/" + fingerprint(identity_key)
 
         async def request():
             async def call():
-                result = await run(str(audio), timeout) if provider == "shazam" else await run()
+                result = await run()
                 if result["status"] == "error":
                     raise RuntimeError(result["error"])
                 return result
@@ -75,7 +78,7 @@ async def recognize_audio(
                 {
                     "id": identity,
                     "label": f"{provider} 识曲",
-                    "input": [str(audio), provider, netease_cookie, NETEASE_VOTE_VERSION],
+                    "input": identity_key,
                 },
                 request,
             )
@@ -102,12 +105,27 @@ async def recognize_audio(
     }
 
 
-async def _run_shazam(audio: str, timeout: int) -> dict:
+async def _run_shazam(audio: str, timeout: int, proxy: str | None = None) -> dict:
     try:
         scope = CURRENT.get()
         if scope is None:
-            return _outcome(await asyncio.wait_for(shazam_orig(audio), timeout=timeout), None)
-        match = await asyncio.wait_for(scope.runtime.shazam_client.recognize(audio), timeout=timeout)
+            # 不走 shazam_orig：它按路径识别，会把文件校验压到 asyncio 默认线程池里。
+            client = create_client(proxy)
+            try:
+                match = await asyncio.wait_for(client.recognize(audio), timeout=timeout)
+            finally:
+                await client.close()
+            track = parse_shazam_response(match)
+            return _outcome((shazam_title(track), track) if track else None, None)
+        if proxy is not None:
+            client = create_client(proxy)
+        else:
+            client = scope.runtime.shazam_client
+        try:
+            match = await asyncio.wait_for(client.recognize(audio), timeout=timeout)
+        finally:
+            if proxy is not None:
+                await client.close()
         track = parse_shazam_response(match)
         return _outcome((shazam_title(track), track) if track else None, None)
     except Exception as error:

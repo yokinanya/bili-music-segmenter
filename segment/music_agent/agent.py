@@ -17,6 +17,7 @@ from segment.music_agent.pipeline_services import PipelineServices
 from segment.music_agent.recognition import deterministic_title_choice, recognize_audio
 from segment.music_agent.runtime import FIXED_BUDGETS, create_runtime
 from segment.music_agent.scan_gemini import scan_candidates
+from segment.shazam import create_client
 from segment.workspace_options import default_options, validate_options
 from segment.workspace_store import DocumentStore
 
@@ -38,15 +39,13 @@ async def run_agent(media: Path, output_dir: Path, **settings) -> Path:
     runtime.result_store = store
     runtime.local_cache = LocalMediaCache(store, runtime.config)
     if options["use_shazam"]:
-        from shazamio import Shazam
-
-        runtime.shazam_client = Shazam()
+        runtime.shazam_client = create_client(config.shazam_proxy)
     client = GeminiClient(config.gemini, workdir=Path(runtime.config["state_dir"]))
     context = PipelineContext(
         media=media,
         output=output_dir,
         options=options,
-        services=_services(options),
+        services=_services(options, config.shazam_proxy),
         runtime=runtime,
         client=client,
     )
@@ -77,7 +76,7 @@ def _options(settings: dict) -> dict:
     return {**validate_options(overrides, defaults), **extra_values}
 
 
-def _services(options: dict) -> PipelineServices:
+def _services(options: dict, shazam_proxy: str | None = None) -> PipelineServices:
     return PipelineServices(
         calls={
             "duration": media_duration,
@@ -89,4 +88,5 @@ def _services(options: dict) -> PipelineServices:
         },
         recognizer_budget=asyncio.Semaphore(FIXED_BUDGETS["recognizer"]),
         netease_budget=asyncio.Semaphore(FIXED_BUDGETS["netease"]),
+        shazam_proxy=shazam_proxy,
     )

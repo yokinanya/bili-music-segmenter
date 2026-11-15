@@ -12,6 +12,7 @@ class PipelineServices:
     calls: dict[str, Callable]
     recognizer_budget: asyncio.Semaphore
     netease_budget: asyncio.Semaphore | None = None
+    shazam_proxy: str | None = None
 
     async def recognize(self, audio, context):
         return await self.calls["recognize"](
@@ -22,6 +23,7 @@ class PipelineServices:
             use_netease=context.options["use_netease"],
             budget=self.recognizer_budget,
             netease_budget=self.netease_budget,
+            shazam_proxy=self.shazam_proxy,
         )
 
     def choose_title(self, recognition):

@@ -14,6 +14,7 @@ from segment.music_agent.gemini import DEFAULT_MODEL, GeminiConfig
 @dataclass(frozen=True)
 class ApiConfig:
     gemini: GeminiConfig
+    shazam_proxy: str | None = None
 
 
 def load_config() -> ApiConfig:
@@ -27,5 +28,13 @@ def load_config() -> ApiConfig:
             proxy=os.getenv("GEMINI_PROXY", "").strip() or None,
             base_url=os.getenv("GEMINI_BASE_URL", "").strip() or None,
             model=os.getenv("GEMINI_AUDIO_MODEL", "").strip() or DEFAULT_MODEL,
-        )
+        ),
+        shazam_proxy=proxy_from_env("SHAZAM_PROXY"),
     )
+
+
+def proxy_from_env(name: str) -> str | None:
+    proxy = os.getenv(name, "").strip()
+    if proxy and "://" not in proxy:
+        raise ValueError(f"{name} 必须带协议，例如 http://127.0.0.1:7890")
+    return proxy or None

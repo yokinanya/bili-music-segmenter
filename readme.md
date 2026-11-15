@@ -20,6 +20,7 @@ uv run -m segment.webui
 | --- | --- |
 | `GEMINI_API_KEY` | 必填，Google Gemini 官方接口密钥 |
 | `GEMINI_PROXY` | 需要代理时填写，必须带协议 |
+| `SHAZAM_PROXY` | Shazam 识曲代理，必须带协议；留空直连且不读系统代理 |
 | `GEMINI_AUDIO_MODEL` | 覆盖音频模型，默认 `gemini-3.8-flash`；旧 `.env` 中的值会覆盖默认值 |
 | `GEMINI_BASE_URL` | 自定义接入地址，一般留空 |
 | `WEBUI_DATA_DIR` | 任务数据目录，默认 `data/webui` |
