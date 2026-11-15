@@ -85,7 +85,27 @@ def make_archive(job: dict, root: Path) -> Path:
 
 def _archive_item(archive, item: dict) -> None:
     prefix = item["id"] + "/"
-    for manifest in manifest_paths(item):
-        archive.write(manifest, prefix + manifest.name)
-    for clip in read_clips(item):
-        archive.write(clip["path"], prefix + clip["id"][:12] + "_" + clip["name"])
+    entries = [(manifest, manifest.name) for manifest in manifest_paths(item)]
+    entries.extend((Path(clip["path"]), clip["name"]) for clip in read_clips(item))
+    names = unique_archive_names([name for _, name in entries])
+    for (path, _), name in zip(entries, names, strict=True):
+        archive.write(path, prefix + name)
+
+
+def unique_archive_names(names: list[str]) -> list[str]:
+    reserved = {name.casefold() for name in names}
+    used: set[str] = set()
+    result = []
+    for name in names:
+        candidate = name
+        if candidate.casefold() in used:
+            path = Path(name)
+            index = 2
+            candidate = f"{path.stem} ({index}){path.suffix}"
+            while candidate.casefold() in reserved:
+                index += 1
+                candidate = f"{path.stem} ({index}){path.suffix}"
+            reserved.add(candidate.casefold())
+        used.add(candidate.casefold())
+        result.append(candidate)
+    return result

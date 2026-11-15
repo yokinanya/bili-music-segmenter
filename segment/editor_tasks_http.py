@@ -8,7 +8,7 @@ from uuid import uuid4
 from segment.music_agent.export import safe_component
 from segment.workspace_options import validate_options
 from segment.workspace_records import new_job
-from segment.workspace_results import contained_path, manifest_paths
+from segment.workspace_results import contained_path, manifest_paths, unique_archive_names
 
 
 def start_analysis(handler, project: dict) -> None:
@@ -106,8 +106,10 @@ def _download(handler, task: dict, parts: list[str]) -> None:
             raise ValueError("Batch archive requires a successful export")
         archive = root / "songs.zip"
         with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as output:
-            for index, clip in enumerate(task["clips"], start=1):
-                output.write(contained_path(Path(clip["path"]), root), f"{index:03d}_{clip['name']}")
+            clips = task["clips"]
+            names = unique_archive_names([clip["name"] for clip in clips])
+            for clip, name in zip(clips, names, strict=True):
+                output.write(contained_path(Path(clip["path"]), root), name)
         handler._serve_file(archive, downloadable=True)
     else:
         raise ValueError("Unknown export download")
