@@ -4,7 +4,6 @@ form.download-panel > .pane-footer > .btn { width: 100%; }
 .task-details { margin-block: 16px; }
 .task-details dl, .detail-grid { display: grid; grid-template-columns: minmax(90px, auto) minmax(0, 1fr); gap: 8px 12px; }
 .task-details dd { margin: 0; overflow-wrap: anywhere; }
-.history-filters { display: grid; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--md-sys-color-outline-variant); }
 .clip-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .clip-editor { display: flex; flex-direction: column; gap: 16px; }
 .clip-editor .field-grid { margin: 0; }

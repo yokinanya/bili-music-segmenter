@@ -21,7 +21,8 @@ CANDIDATE_CONCURRENCY = 3
 
 async def execute_pipeline(context: PipelineContext) -> Path:
     runtime = context.runtime
-    initialize_inventory(context.output)
+    if not context.options.get("analysis_only"):
+        initialize_inventory(context.output)
     duration = await asyncio.to_thread(
         runtime.run, context.spec("probe", "媒体分析", {}), lambda: context.services.calls["duration"](context.media)
     )
@@ -72,9 +73,20 @@ async def execute_pipeline(context: PipelineContext) -> Path:
         if candidates:
             _finish(runtime, counters[1])
         persist()
-        remove_superseded_exports(context.output, list(records.values()))
+        _raise_scan_errors(chunks, runtime)
+        if not context.options.get("analysis_only"):
+            remove_superseded_exports(context.output, list(records.values()))
         runtime.event("complete", "结果整理", state="succeeded", completed=1, total=1)
         return manifest
+
+
+def _raise_scan_errors(chunks: list, runtime) -> None:
+    failures = [f"分块 {chunk['chunk']}：{chunk['error']}" for chunk in chunks if chunk.get("state") == "failed"]
+    if not failures:
+        return
+    message = "扫描未完整完成，成功分块已保留为部分结果：" + "；".join(failures)
+    runtime.event("scan", "分块扫描", state="failed", error=message, finished_at=now())
+    raise ValueError(message)
 
 
 def _finish(runtime, counter: tuple[str, str], failed: Exception | None = None) -> None:
@@ -111,7 +123,11 @@ async def _scan(context: PipelineContext) -> tuple[list, list]:
         )
         return {"candidates": [asdict(candidate) for candidate in candidates], "chunks": chunks}
 
-    spec = {**context.spec("scan", "分块扫描", {}), "total": context.runtime.config["scan_total"]}
+    spec = {
+        **context.spec("scan", "分块扫描", {}),
+        "total": context.runtime.config["scan_total"],
+        "validate": lambda value: not any(chunk.get("state") == "failed" for chunk in value["chunks"]),
+    }
     data = await asyncio.to_thread(context.runtime.run, spec, scan)
     return [Candidate(**item) for item in data["candidates"]], data["chunks"]
 
@@ -153,12 +169,17 @@ async def _export_record(current: dict, context: PipelineContext) -> dict:
         prepared = interval
         if "recognition" not in prepared:
             prepared = {**interval, **await recognize_interval(interval, context)}
-        exported = await _export(prepared, current["index"], context)
-        intervals.append({**prepared, "file": exported})
+        if context.options.get("analysis_only"):
+            intervals.append(prepared)
+        else:
+            exported = await _export(prepared, current["index"], context)
+            intervals.append({**prepared, "file": exported})
     return {
         **current,
         "singing_intervals": intervals,
-        "decision": "exported" if intervals else current["decision"],
+        "decision": ("review" if context.options.get("analysis_only") else "exported")
+        if intervals
+        else current["decision"],
     }
 
 

@@ -1,0 +1,43 @@
+/* Full-screen song-cut editor shell: thin tool rail, compact app bar, workspace panes, full-width timeline. */
+.editor-shell { display: grid; grid-template-columns: 56px minmax(0, 1fr); height: 100dvh; overflow: hidden; background: var(--md-sys-color-surface); }
+.tool-rail { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 0; background: var(--md-sys-color-surface-container-lowest); border-right: 1px solid var(--md-sys-color-outline-variant); }
+.rail-logo, .rail-button { border: 0; background: none; color: var(--md-sys-color-on-surface-variant); display: grid; place-items: center; cursor: pointer; font: inherit; }
+.rail-logo { width: 36px; height: 36px; border-radius: 10px; margin-bottom: 12px; background: var(--md-sys-color-inverse-surface); color: var(--md-sys-color-inverse-on-surface); }
+.rail-button { width: 42px; min-height: 42px; gap: 2px; padding: 5px 0; border-radius: 10px; font-size: 9px; }
+.rail-button:hover, .rail-button[aria-pressed='true'] { color: var(--md-sys-color-on-secondary-container); background: var(--md-sys-color-secondary-container); }
+.rail-spacer { flex: 1; }
+.editor-column { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.editor-appbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 48px; padding: 0 16px; border-bottom: 1px solid var(--md-sys-color-outline-variant); flex-shrink: 0; }
+.appbar-project { display: flex; align-items: center; gap: 10px; border: 0; background: none; color: inherit; font: inherit; font-size: 14px; font-weight: 500; padding: 4px 6px; border-radius: 8px; cursor: pointer; }
+.appbar-project:hover { background: var(--md-sys-color-surface-container); }
+.appbar-actions { display: flex; align-items: center; gap: 8px; color: var(--md-sys-color-on-surface-variant); }
+.editor-actions { display: flex; align-items: center; gap: 8px; }
+.editor-actions[hidden] { display: none; }
+.appbar-text-action, .theme-toggle { border: 0; background: transparent; color: inherit; cursor: pointer; }
+.appbar-text-action { padding: 6px 10px; font: inherit; font-size: 12px; white-space: nowrap; }
+.appbar-text-action:hover:not(:disabled) { color: var(--md-sys-color-primary); }
+.appbar-text-action:disabled { opacity: .4; cursor: default; }
+.theme-toggle { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; }
+.appbar-text-action:focus-visible, .theme-toggle:focus-visible { outline: 2px solid var(--md-sys-color-primary); outline-offset: 2px; }
+.appbar-hint { font-size: 11px; }
+.editor-main { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 12px 16px 0; position: relative; }
+.editor-view { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+.editor-view[hidden] { display: none; }
+.editor-main > .error { margin: 0 0 10px; flex-shrink: 0; }
+.editor-flow { overflow: auto; display: block; }
+.editor-flow .workspace-content { min-height: 0; }
+.editor-flow h1 { font-size: 18px; margin: 0 0 12px; }
+.editor-flow .usage-page { overflow: visible; }
+.settings-card { border: 1px solid var(--md-sys-color-outline-variant); border-radius: 10px; padding: 16px; margin-bottom: 12px; background: var(--md-sys-color-surface-container-lowest); }
+.settings-card h2 { font-size: 14px; margin: 0 0 12px; }
+.task-settings .parameters { border: 0; padding-top: 0; margin-top: 16px; }
+.editor-main .snackbar { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); width: auto; min-width: 320px; }
+@media (min-width: 1600px) {
+  .editor-main { padding: 16px 24px 0; }
+}
+@media (max-width: 839px) {
+  .appbar-hint { display: none; }
+  .editor-main { padding: 8px 8px 0; overflow: auto; }
+  .editor-shell { height: auto; min-height: 100dvh; grid-template-columns: 52px minmax(0, 1fr); }
+  .rail-button { width: 40px; }
+}

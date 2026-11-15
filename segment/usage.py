@@ -52,15 +52,30 @@ def _validated_event(event: dict) -> dict:
 
 
 class UsageTotals:
-    def __init__(self) -> None:
+    def __init__(self, store=None) -> None:
         self._lock = Lock()
-        self._events: list[dict] = []
+        self._store = store
+        self._events: list[dict] = self._load()
+
+    def _load(self) -> list[dict]:
+        """Previous runs survive a restart because the events live in SQLite."""
+        if self._store is None:
+            return []
+        return [event for record in self._store.list("usage") for event in record["events"]]
 
     def add(self, event: dict) -> dict:
         validated = _validated_event(event)
         with self._lock:
             self._events.append(validated)
+            if self._store is not None:
+                self._store.put("usage", {"id": "totals", "events": list(self._events)})
         return validated
+
+    def replace(self, events: list[dict]) -> None:
+        with self._lock:
+            self._events = list(events)
+            if self._store is not None:
+                self._store.put("usage", {"id": "totals", "events": self._events})
 
     def snapshot(self) -> dict:
         with self._lock:
@@ -77,19 +92,19 @@ class UsageTotals:
                     "input_tokens": 0,
                     "output_tokens": 0,
                     "cached_tokens": 0,
-                    "estimated_cny": 0.0,
+                    "estimated_usd": 0.0,
                 },
             )
             _accumulate(row, event["usage"])
         rows = list(models.values())
-        complete = all(not row["missing_usage"] and row["estimated_cny"] is not None for row in rows)
+        complete = all(not row["missing_usage"] and row["estimated_usd"] is not None for row in rows)
         return {
             "models": rows,
             "calls": len(events),
             "input_tokens": sum(row["input_tokens"] for row in rows),
             "output_tokens": sum(row["output_tokens"] for row in rows),
             "cached_tokens": sum(row["cached_tokens"] for row in rows),
-            "estimated_cny": sum(row["estimated_cny"] or 0 for row in rows),
+            "estimated_usd": sum(row["estimated_usd"] or 0 for row in rows),
             "complete": complete,
         }
 
@@ -105,8 +120,8 @@ def _accumulate(row: dict, usage: dict | None) -> None:
     row["cached_tokens"] += cached
     price = PRICES.get(row["model"])
     if price is None:
-        row["estimated_cny"] = None
+        row["estimated_usd"] = None
         return
     input_price, cached_price, output_price = price
     cost = ((prompt - cached) * input_price + cached * cached_price + completion * output_price) / MILLION
-    row["estimated_cny"] += float(cost)
+    row["estimated_usd"] += float(cost)

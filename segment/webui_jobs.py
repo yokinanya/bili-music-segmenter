@@ -6,17 +6,20 @@ import shutil
 from pathlib import Path
 from threading import RLock
 
+from segment.editor_exports import Exports
 from segment.music_agent.export import export_video
 from segment.music_agent.media import media_duration
 from segment.music_agent.runtime import fingerprint
 from segment.workspace_downloads import register_download, validate_download
 from segment.workspace_options import RETIRED_OPTIONS, default_options, validate_options
 from segment.workspace_parts import can_complete_parts, is_bilibili_video
-from segment.workspace_records import ACTIVE_STATES, end_steps, new_job
+from segment.workspace_records import ACTIVE_STATES, end_steps, new_job, usage_snapshot
 from segment.workspace_result_edit import edit_result, manifest_path
-from segment.workspace_results import history_entry, make_archive, read_clips
+from segment.workspace_results import make_archive, read_clips
 
 LOG_READ_BYTES = 256 * 1024
+MIME_TYPES = {suffix: f"video/{suffix[1:]}" for suffix in (".mp4", ".m4v", ".webm")}
+MIME_TYPES[".flv"] = "video/x-flv"
 
 
 class Jobs:
@@ -26,16 +29,36 @@ class Jobs:
         self.execution = services["execution"]
         self.cleanup = services["cleanup"]
         self.usage = services["usage"]
+        self.song_search = services["song_search"]
         self.defaults = default_options()
+        try:
+            self.defaults = validate_options(store.get("settings", "task-defaults")["options"], self.defaults)
+        except KeyError:
+            pass
         self.result_services = {
             "export": services.get("export", export_video),
             "duration": services.get("duration", media_duration),
             "source_root": self.root / "uploads",
             "save": lambda job: self.store.put("jobs", job),
         }
+        self.editor_exports = Exports(
+            store,
+            self.root,
+            {
+                "source": lambda identity: Path(self._ready(identity)["source_path"]),
+                "export": self.result_services["export"],
+            },
+        )
         self._lock = RLock()
         self._job_locks = {}
         self._reconcile()
+
+    def save_defaults(self, values: dict) -> dict:
+        options = validate_options(values, self.defaults)
+        with self._lock:
+            self.store.put("settings", {"id": "task-defaults", "options": options})
+            self.defaults = options
+        return options
 
     def _reconcile(self) -> None:
         for job in self.store.list("jobs"):
@@ -114,6 +137,10 @@ class Jobs:
             raise ValueError(f"源文件未完成上传或已缺失：{item['name']}")
         return {**{key: value for key, value in item.items() if key != "download_config"}, "source_path": str(path)}
 
+    def upload_mime(self, identity: str) -> str:
+        name = self.store.get("uploads", identity)["name"]
+        return MIME_TYPES.get(Path(name).suffix.lower(), "application/octet-stream")
+
     def _source_path(self, upload: dict) -> Path:
         if upload.get("kind") == "download":
             return self.root / "uploads" / upload["id"] / "source.mkv"
@@ -132,6 +159,7 @@ class Jobs:
         job = self.store.get("jobs", identity)
         return {
             **job,
+            "usage": usage_snapshot(job["usage_events"]),
             "options": {key: value for key, value in job["options"].items() if key not in RETIRED_OPTIONS},
             "can_complete_parts": can_complete_parts(job, self.store),
             "batch": [self._public_item(item) for item in job["batch"]],
@@ -157,8 +185,42 @@ class Jobs:
             )
 
     def history(self) -> list[dict]:
-        current = [history_entry(self.status(job["id"])) for job in self.store.list("jobs")]
-        return sorted([*self.store.list("legacy"), *current], key=lambda item: item["started_at"], reverse=True)
+        return sorted(self.store.list("legacy"), key=lambda item: item["started_at"], reverse=True)
+
+    def delete_source(self, project_id: str) -> dict:
+        """Remove an imported source and its project. Exported files stay on disk."""
+        projects = {project["id"]: project for project in self.store.list("projects")}
+        project = projects.get(project_id)
+        if project is None:
+            raise KeyError(project_id)
+        identity = project["upload_id"]
+        jobs = [job for job in self.store.list("jobs") if identity in job["upload_ids"]]
+        if any(job["state"] in ACTIVE_STATES for job in jobs):
+            raise ValueError("该素材仍有任务在运行，请先停止")
+        self.store.delete("projects", project_id)
+        for job in jobs:
+            self.store.delete("jobs", job["id"])
+        if not any(value["upload_id"] == identity for value in self.store.list("projects")):
+            self.uploads.remove(identity)
+        return {"deleted": project_id}
+
+    def clear_history(self) -> dict:
+        """Drop task records and legacy entries; exported files and project sources stay on disk."""
+        with self._lock:
+            jobs = self.store.list("jobs")
+            if any(job["state"] in ACTIVE_STATES for job in jobs):
+                raise ValueError("有任务正在运行，请先停止再清除记录")
+            keep = {project["upload_id"] for project in self.store.list("projects")}
+            for job in jobs:
+                upload_ids = [identity for identity in job["upload_ids"] if identity not in keep]
+                self.store.delete("jobs", job["id"])
+                self._remove_sources(upload_ids, excluding=job["id"])
+            legacy = self.store.list("legacy")
+            for entry in legacy:
+                self.store.delete("legacy", entry["id"])
+            # Usage totals live outside the task history and are never recomputed here:
+            # rebuilding them from job events would double-count what totals already hold.
+        return {"removedJobs": len(jobs), "removedLegacy": len(legacy)}
 
     def retry(self, identity: str) -> str:
         with self._job_lock(identity), self._lock:
@@ -190,6 +252,7 @@ class Jobs:
                     **job,
                     "batch": items,
                     "attempt": job["attempt"] + 1,
+                    "refresh_recognition": False,
                     "state": "queued",
                     "finished_at": None,
                     "stop_requested": False,
@@ -260,10 +323,13 @@ class Jobs:
     def _remove_sources(self, identities: list[str], *, excluding: str) -> None:
         remaining = [job for job in self.store.list("jobs") if job["id"] != excluding]
         for identity in identities:
+            if any(project["upload_id"] == identity for project in self.store.list("projects")):
+                continue
             if any(identity in job["upload_ids"] for job in remaining):
                 continue
             if any(source["id"] == identity for source in self.store.list("uploads")):
                 self.uploads.remove(identity, excluding_job=excluding)
 
     def close(self) -> None:
+        self.editor_exports.close()
         self.execution.close()

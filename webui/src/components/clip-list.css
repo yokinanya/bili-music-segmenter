@@ -9,7 +9,7 @@
 .clip-title { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; white-space: normal; }
 .clip-subtitle, .clip-range { font-size: 12px; line-height: 1.5; font-weight: 400; color: var(--md-sys-color-on-surface-variant); white-space: normal; overflow-wrap: anywhere; }
 .clip-range { font-variant-numeric: tabular-nums; }
-.clip-toggle > svg, .clip-download { flex-shrink: 0; }
+.clip-toggle > .icon, .clip-download { flex-shrink: 0; }
 .clip-row-actions { display: flex; align-items: center; gap: 4px; }
 .clip-download { display: inline-flex; align-items: center; gap: 4px; }
 .clip-open > .clip-row { background: var(--md-sys-color-surface-container-low); border-radius: 8px; }

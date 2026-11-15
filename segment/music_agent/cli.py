@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 from pathlib import Path
 
 from segment.logs import agent_log_path, configure_logging
@@ -27,6 +28,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--recognizer-timeout", type=int, default=60)
     parser.add_argument("--skip-shazam", action="store_true")
     parser.add_argument("--skip-netease", action="store_true")
+    parser.add_argument(
+        "--analysis-only",
+        action="store_true",
+        default=os.getenv("MUSIC_AGENT_ANALYSIS_ONLY") == "true",
+        help="仅分析与识曲，不导出视频",
+    )
     parser.add_argument("--log-level", choices=("DEBUG", "INFO", "WARNING", "ERROR"), default="INFO")
     return apply_environment(parser)
 
@@ -60,6 +67,7 @@ def main() -> None:
             use_netease=not args.skip_netease,
             netease_cookie=args.netease_cookie,
             recognizer_timeout=args.recognizer_timeout,
+            analysis_only=args.analysis_only,
         )
     )
     LOGGER.info("Manifest written to %s", manifest)

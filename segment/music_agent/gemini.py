@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import os
 import tempfile
 import time
@@ -15,12 +16,14 @@ from google.genai import types
 
 from segment.usage import report_usage
 
-DEFAULT_MODEL = "gemini-4-hydrogen"
+DEFAULT_MODEL = "gemini-3.8-flash"
+THINKING_LEVEL = "high"
 # 内联 base64 上限 20MB（含 prompt）；留出余量避免恰好越界。更大的音频走 Files API。
 INLINE_LIMIT_BYTES = 19_000_000
 UPLOAD_ACTIVE_TIMEOUT_SECONDS = 300
 UPLOAD_POLL_SECONDS = 2
 REQUEST_TIMEOUT_SECONDS = 1800
+LOGGER = logging.getLogger(__name__)
 
 
 class GeminiConfig:
@@ -77,13 +80,16 @@ class GeminiClient:
         *,
         model: str | None = None,
         label: str = "Gemini 调用",
+        cache: bool = True,
     ) -> dict[str, Any]:
         from segment.music_agent.json_response import parse_json
-        from segment.music_agent.runtime import CURRENT, fingerprint
+        from segment.music_agent.runtime import CURRENT, file_digest, fingerprint
 
         chosen = model or self.model
         scope = CURRENT.get()
-        identity = label + "/" + fingerprint([str(audio), chosen, prompt, schema])
+        audio_key = file_digest(audio) if audio is not None and scope is not None else None
+        request_key = [audio_key, chosen, THINKING_LEVEL, prompt, schema]
+        identity = label + "/" + fingerprint(request_key)
 
         def perform() -> dict[str, Any]:
             inputs: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
@@ -98,22 +104,20 @@ class GeminiClient:
                 interaction = self._client.interactions.create(
                     model=chosen,
                     input=inputs,
+                    generation_config={"thinking_level": THINKING_LEVEL},
                     response_format={"type": "text", "mime_type": "application/json", "schema": schema},
                 )
             finally:
                 # 上传文件 48 小时自动过期，这里立即释放，避免堆积占用存储配额。
                 if uploaded is not None:
                     self._client.files.delete(name=uploaded.name)
-            text = (interaction.output_text or "").strip()
-            if not text:
-                raise ValueError(f"Gemini 模型 {chosen} 返回空响应")
-            usage = _usage(interaction.usage)
-            report_usage(chosen, usage)
-            return {"data": parse_json(text), "usage": usage}
+            return _read_response(interaction, chosen, parse_json)
 
         if scope is None:
             return perform()
-        return scope.runtime.run({"id": identity, "label": label, "input": [chosen, prompt], "cache": False}, perform)
+        return scope.runtime.run(
+            {"id": identity, "label": label, "input": request_key, "shared": True, "cache": cache}, perform
+        )
 
     def _upload(self, audio: Path) -> Any:
         uploaded = self._client.files.upload(file=audio, config=types.UploadFileConfig(mime_type="audio/wav"))
@@ -128,6 +132,29 @@ class GeminiClient:
             self._client.files.delete(name=uploaded.name)
             raise ValueError(f"Gemini 文件 {audio.name} 处理失败：{uploaded.error}")
         return uploaded
+
+
+def _read_response(interaction: Any, model: str, parse) -> dict:
+    usage = _usage(interaction.usage)
+    report_usage(model, usage)
+    text = (interaction.output_text or "").strip()
+    status = getattr(interaction, "status", None)
+    metadata = {
+        "id": getattr(interaction, "id", None),
+        "status": getattr(status, "value", status),
+        "output_characters": len(text),
+        "has_continuation": bool(getattr(interaction, "continuation_token", None)),
+    }
+    try:
+        if not text:
+            raise ValueError(f"Gemini 模型 {model} 返回空响应")
+        if metadata["status"] not in (None, "completed"):
+            raise ValueError(f"Gemini 响应未完成：{metadata['status']}")
+        data = parse(text)
+    except ValueError as error:
+        LOGGER.error("Gemini 响应无效 model=%s metadata=%s usage=%s error=%s", model, metadata, usage, error)
+        raise ValueError(f"{error}；响应诊断：{metadata}") from error
+    return {"data": data, "usage": usage, "response_metadata": metadata}
 
 
 def _http_client(proxy: str | None) -> httpx.Client:

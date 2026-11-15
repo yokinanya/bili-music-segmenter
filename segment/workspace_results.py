@@ -7,6 +7,8 @@ import json
 import zipfile
 from pathlib import Path
 
+from segment.workspace_records import usage_snapshot
+
 
 def read_clips(item: dict) -> list[dict]:
     clips = []
@@ -61,7 +63,7 @@ def history_entry(job: dict) -> dict:
         "finished_at": job["finished_at"],
         "medias": [item["media"] for item in job["batch"]],
         "clip_count": len(job.get("clips", [])),
-        "usage": job["usage"],
+        "usage": usage_snapshot(job["usage_events"]),
         "attempt": job["attempt"],
         "upload_ids": job["upload_ids"],
         "options": job["options"],

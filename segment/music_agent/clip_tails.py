@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import math
 
+from segment.music_agent.confirmed_overlap import merge_confirmed_overlaps
+
 TAIL_EXTENSION_SECONDS = 2.0
 
 
 def extend_clip_tails(records: list[dict], duration: float) -> list[dict]:
     if not math.isfinite(duration) or duration <= 0:
         raise ValueError("切片尾部延长需要有效的源视频时长")
+    records = merge_confirmed_overlaps(records)
     entries = sorted(
         (interval["start_seconds"], interval["end_seconds"], row, column)
         for row, record in enumerate(records)

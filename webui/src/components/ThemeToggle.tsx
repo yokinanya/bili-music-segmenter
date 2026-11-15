@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { IconButton } from './Material';
 import { Icon } from './Icon';
+import { IconButton } from './Material';
 
 type Theme = 'system' | 'light' | 'dark';
 
@@ -42,5 +42,5 @@ export function ThemeToggle() {
     });
   }, []);
 
-  return <IconButton variant="tonal" label={`主题：${LABELS[theme]}，点击切换`} onClick={cycle}><Icon name={theme} /></IconButton>;
+  return <IconButton className="theme-toggle" label={`主题：${LABELS[theme]}，点击切换`} onClick={cycle}><Icon name={theme} /></IconButton>;
 }

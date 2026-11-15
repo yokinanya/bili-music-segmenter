@@ -29,7 +29,7 @@ def test_cost_with_cached_tokens():
     )
     result = totals.snapshot()
     # 1M 输入含 0.5M 缓存 + 1M 输出：0.5*1.5 + 0.5*0.075 + 1*7.5 = 8.2875 美元
-    assert result["estimated_cny"] == pytest.approx(8.2875)
+    assert result["estimated_usd"] == pytest.approx(8.2875)
     assert result["complete"]
     assert result["cached_tokens"] == 500_000
     assert UsageTotals().snapshot()["calls"] == 0
@@ -42,7 +42,7 @@ def test_missing_usage_and_unknown_model():
     result = totals.snapshot()
     assert not result["complete"]
     assert result["models"][0]["missing_usage"] == 1
-    assert result["models"][1]["estimated_cny"] is None
+    assert result["models"][1]["estimated_usd"] is None
 
 
 @pytest.mark.parametrize(
@@ -71,7 +71,7 @@ def test_invalid_token_counts_are_missing_usage_and_do_not_modify_input(usage, c
     assert result["models"][0]["missing_usage"] == 1
     assert not result["complete"]
     # 10 输入 + 2 输出 @ $1.5/$7.5 每百万：0.000015 + 0.000015 = 0.00003 美元
-    assert result["estimated_cny"] == pytest.approx(0.00003)
+    assert result["estimated_usd"] == pytest.approx(0.00003)
     assert "已忽略" in caplog.text
 
 
@@ -158,3 +158,16 @@ def test_cli_environment_defaults(monkeypatch):
     assert args.skip_netease is True
     args = build_parser().parse_args(["--media", "input.mp4", "--outdir", "output", "--minimum-confidence", "0.8"])
     assert args.minimum_confidence == 0.8
+
+def test_usage_totals_survive_a_restart(tmp_path):
+    from segment.usage import UsageTotals
+    from segment.workspace_store import DocumentStore
+
+    path = tmp_path / "workspace.sqlite3"
+    UsageTotals(DocumentStore(path)).add(
+        {"model": "gemini-3.8-flash", "usage": {"total_input_tokens": 1_000_000, "total_output_tokens": 0}}
+    )
+    snapshot = UsageTotals(DocumentStore(path)).snapshot()
+    assert snapshot["calls"] == 1
+    assert snapshot["input_tokens"] == 1_000_000
+    assert snapshot["estimated_usd"] > 0

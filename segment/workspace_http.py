@@ -32,6 +32,8 @@ class WorkspaceHTTP(BaseHTTPRequestHandler):
         supplied = self.headers.get("X-WebUI-Token", "")
         if route.endswith("/archive") or "/clip/" in route or "/manifest/" in route:
             supplied = supplied or self._query("token")
+        if route.startswith("/api/projects/") and route.endswith("/source"):
+            supplied = supplied or self._query("token")
         if secrets.compare_digest(supplied, self.token):
             return True
         self._json(403, {"error": "访问令牌无效，请使用服务启动时显示的地址"})
@@ -66,15 +68,22 @@ class WorkspaceHTTP(BaseHTTPRequestHandler):
             return
         self._serve_file(asset)
 
-    def _serve_file(self, path: Path, *, downloadable: bool = False, filename: str | None = None) -> None:
+    def _serve_file(
+        self,
+        path: Path,
+        *,
+        mime: str | None = None,
+        downloadable: bool = False,
+        filename: str | None = None,
+    ) -> None:
         size = path.stat().st_size
         byte_range = parse_range(self.headers.get("Range"), size)
         if self.headers.get("Range") and byte_range is None:
-            self._send(416, b"", content_type(path), {"Content-Range": f"bytes */{size}"})
+            self._send(416, b"", mime or content_type(path), {"Content-Range": f"bytes */{size}"})
             return
         start, end = byte_range or (0, size - 1)
         self.send_response(206 if byte_range else 200)
-        self.send_header("Content-Type", content_type(path))
+        self.send_header("Content-Type", mime or content_type(path))
         self.send_header("Content-Length", str(end - start + 1))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Frame-Options", "DENY")

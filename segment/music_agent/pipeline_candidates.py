@@ -44,14 +44,14 @@ async def recognize_interval(interval: dict, context: PipelineContext, candidate
         "识曲与标题判断",
         [TITLE_PIPELINE_VERSION, interval, asdict(candidate) if candidate else None],
     )
-    return await context.runtime.async_run(spec, lambda: _identify(interval, context, candidate))
+    return await context.runtime.async_run({**spec, "shared": True}, lambda: _identify(interval, context, candidate))
 
 
 async def _identify(interval: dict, context: PipelineContext, candidate) -> dict:
     audio = await asyncio.to_thread(_recognition_audio, interval, context)
     recognition = await context.services.recognize(audio, context)
     errors = [value["error"] for value in recognition.values() if value.get("status") == "error"]
-    if errors:
+    if errors and not any(value.get("status") == "matched" for value in recognition.values()):
         raise RuntimeError("识曲服务请求失败：" + "；".join(errors))
     if candidate:
         recognition = {

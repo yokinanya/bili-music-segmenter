@@ -25,7 +25,7 @@ def test_gemini_key_and_defaults(model_env, monkeypatch):
     config = load_config()
     assert config.gemini.api_key == "test-key"
     assert config.gemini.proxy is None
-    assert config.gemini.model == "gemini-4-hydrogen"
+    assert config.gemini.model == "gemini-3.8-flash"
 
 
 def test_gemini_proxy_and_model_override(model_env, monkeypatch):

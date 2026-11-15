@@ -1,10 +1,10 @@
 import type { UsageSnapshot } from '@/lib/types';
 export function money(value: number | null) {
-  return value === null ? '价格未知' : `¥${value.toFixed(6)}`;
+  return value === null ? '价格未知' : `USD $${value.toFixed(6)}`;
 }
 export function UsageSummary({ usage, label }: { usage: UsageSnapshot | null; label: string }) {
   return <article className="panel usage-summary"><h2>{label}</h2>
-    {usage ? <><strong className="usage-amount">{money(usage.estimated_cny)}</strong>
+    {usage ? <><strong className="usage-amount">{money(usage.estimated_usd)}</strong>
       <dl className="usage-stats"><div><dt>模型调用</dt><dd>{usage.calls}</dd></div>
         <div><dt>输入 token</dt><dd>{usage.input_tokens.toLocaleString()}</dd></div>
         <div><dt>缓存 token</dt><dd>{usage.cached_tokens.toLocaleString()}</dd></div>

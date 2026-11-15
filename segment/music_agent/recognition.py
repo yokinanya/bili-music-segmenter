@@ -84,10 +84,17 @@ async def recognize_audio(
     results = await asyncio.gather(
         *(invoke(provider, run) for provider, run in runners.items()), return_exceptions=True
     )
+    if not any(isinstance(result, dict) and result.get("status") == "matched" for result in results):
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+    outcome = {
+        provider: _outcome(None, result) if isinstance(result, Exception) else result
+        for provider, result in zip(runners, results, strict=True)
+    }
     for result in results:
-        if isinstance(result, BaseException):
+        if isinstance(result, BaseException) and not isinstance(result, Exception):
             raise result
-    outcome = dict(zip(runners, results, strict=True))
     # A disabled provider stays explicitly disabled so the record never looks like a failed match.
     return {
         "shazam": outcome.get("shazam", {"status": "disabled"}),

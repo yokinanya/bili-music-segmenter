@@ -69,6 +69,8 @@ def child_environment(job: dict, item: dict, *, event_fd: int, state_dir: Path, 
         "MUSIC_AGENT_JOB_ID": job["id"],
         "MUSIC_AGENT_SOURCE_DIGEST": item["sha256"],
         "MUSIC_AGENT_ATTEMPT": str(job["attempt"]),
+        "MUSIC_AGENT_ANALYSIS_ONLY": str(job.get("analysis_only", False)).lower(),
+        "MUSIC_AGENT_REFRESH_RECOGNITION": str(job.get("refresh_recognition", False)).lower(),
     }
 
 

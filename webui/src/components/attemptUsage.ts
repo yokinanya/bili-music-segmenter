@@ -33,11 +33,11 @@ function accumulate(row: ModelUsage, value: unknown): ModelUsage {
   const cost = price ? ((prompt - cached) * price[0] + cached * price[1] + completion * price[2]) / MILLION : null;
   return { ...row, calls: row.calls + 1, input_tokens: row.input_tokens + prompt,
     cached_tokens: row.cached_tokens + cached, output_tokens: row.output_tokens + completion,
-    estimated_cny: cost === null ? null : (row.estimated_cny ?? 0) + cost };
+    estimated_usd: cost === null ? null : (row.estimated_usd ?? 0) + cost };
 }
 export function attemptUsage(job: JobStatus): UsageSnapshot {
   const models = job.usage_events.filter((event) => event.attempt === job.attempt).reduce<Record<string, ModelUsage>>((rows, event) => {
-    const row = Object.hasOwn(rows, event.model) ? rows[event.model] : { model: event.model, calls: 0, missing_usage: 0, input_tokens: 0, output_tokens: 0, cached_tokens: 0, estimated_cny: 0 };
+    const row = Object.hasOwn(rows, event.model) ? rows[event.model] : { model: event.model, calls: 0, missing_usage: 0, input_tokens: 0, output_tokens: 0, cached_tokens: 0, estimated_usd: 0 };
     return { ...rows, [event.model]: accumulate(row, event.usage) };
   }, {});
   const rows = Object.values(models);
@@ -45,6 +45,6 @@ export function attemptUsage(job: JobStatus): UsageSnapshot {
     input_tokens: rows.reduce((sum, row) => sum + row.input_tokens, 0),
     output_tokens: rows.reduce((sum, row) => sum + row.output_tokens, 0),
     cached_tokens: rows.reduce((sum, row) => sum + row.cached_tokens, 0),
-    estimated_cny: rows.reduce((sum, row) => sum + (row.estimated_cny ?? 0), 0),
-    complete: rows.every((row) => !row.missing_usage && row.estimated_cny !== null) };
+    estimated_usd: rows.reduce((sum, row) => sum + (row.estimated_usd ?? 0), 0),
+    complete: rows.every((row) => !row.missing_usage && row.estimated_usd !== null) };
 }

@@ -24,20 +24,18 @@ export interface ClipEditProgress {
   stage: 'preparing' | 'encoding' | 'saving';
   completed_seconds: number; total_seconds: number | null; elapsed_seconds: number;
 }
-export interface ModelUsage { model: string; calls: number; missing_usage: number; input_tokens: number; output_tokens: number; cached_tokens: number; estimated_cny: number | null }
-export interface UsageSnapshot { models: ModelUsage[]; calls: number; input_tokens: number; output_tokens: number; cached_tokens: number; estimated_cny: number; complete: boolean }
+export interface ModelUsage { model: string; calls: number; missing_usage: number; input_tokens: number; output_tokens: number; cached_tokens: number; estimated_usd: number | null }
+export interface UsageSnapshot { models: ModelUsage[]; calls: number; input_tokens: number; output_tokens: number; cached_tokens: number; estimated_usd: number; complete: boolean }
 export interface JobAttempt { number: number; state: JobState; started_at: string; finished_at: string; usage: UsageSnapshot }
 export interface JobStatus {
+  stop_requested?: boolean;
   can_complete_parts?: boolean;
   id: string; state: JobState; attempt: number; attempts: JobAttempt[]; batch: BatchItem[];
   current_index: number | null; clips: Clip[]; usage: UsageSnapshot; options: RunOptions; upload_ids: string[];
   started_at: string; finished_at: string | null; error: string | null; cleanup_error: string | null;
   usage_events: { model: string; attempt: number; media_id: string; at: string; usage: unknown }[];
 }
-export interface HistoryEntry {
-  id: string; state: JobState; started_at: string; finished_at: string | null; medias: string[];
-  clip_count: number; usage: UsageSnapshot; legacy: boolean; availability?: string; attempt: number;
-}
+
 export interface Bootstrap { version: number; defaults: RunOptions; active_job_ids: string[] }
 export interface LogChunk { text: string; offset: number; complete: boolean }
 export const isActive = (state?: string) => state === 'queued' || state === 'running';

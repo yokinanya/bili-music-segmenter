@@ -12,8 +12,13 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import httpx
+
+from segment.editor_http import dispatch_project
 from segment.logs import configure_logging, server_log_path
 from segment.music_agent.media_cache import clean_local_cache
+from segment.song_lyrics import song_lyrics
+from segment.song_search import search_songs
 from segment.usage import UsageTotals
 from segment.webui_jobs import Jobs
 from segment.workspace_edit_stream import STREAM_CONTENT_TYPE, stream_edit
@@ -63,6 +68,8 @@ class Handler(WorkspaceHTTP):
                 self._static(DIST_DIR, route)
             elif route.startswith("/api/uploads"):
                 self._uploads(method, route)
+            elif route == "/api/projects" or route.startswith("/api/projects/"):
+                dispatch_project(self, method, route)
             elif route.startswith("/api/jobs/"):
                 self._job(method, route)
             else:
@@ -71,8 +78,8 @@ class Handler(WorkspaceHTTP):
             self._json(400, {"error": str(error)})
         except (KeyError, FileNotFoundError) as error:
             self._json(404, {"error": f"记录或文件不存在：{error}"})
-        except (BrokenPipeError, ConnectionResetError):
-            LOGGER.info("浏览器已断开连接")
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return
         except Exception as error:
             LOGGER.exception("请求执行失败")
             self._json(500, {"error": str(error)})
@@ -82,6 +89,8 @@ class Handler(WorkspaceHTTP):
             self._json(201, {"id": self.jobs.start_download(self._payload())})
         elif method == "POST" and route == "/api/jobs":
             self._json(201, {"id": self.jobs.start(self._payload())})
+        elif method == "PUT" and route == "/api/settings/task-defaults":
+            self._json(200, {"options": self.jobs.save_defaults(self._payload())})
         elif method == "GET" and route == "/api/bootstrap":
             self._json(
                 200,
@@ -95,8 +104,14 @@ class Handler(WorkspaceHTTP):
             )
         elif method == "GET" and route == "/api/history":
             self._json(200, {"entries": self.jobs.history()})
+        elif method == "POST" and route == "/api/history/clear":
+            self._json(200, self.jobs.clear_history())
         elif method == "GET" and route == "/api/usage":
             self._json(200, self.jobs.usage.snapshot())
+        elif method == "GET" and route == "/api/songs/search":
+            self._json(200, self.jobs.song_search(self._query("q")))
+        elif method == "POST" and route == "/api/songs/lyrics":
+            self._json(200, song_lyrics(self._payload(), get=httpx.get))
         else:
             self._json(404, {"error": "地址不存在"})
 
@@ -168,7 +183,7 @@ def create_jobs(root: Path, *, runner=None, cleanup=None) -> Jobs:
     root = root.resolve()
     store = DocumentStore(root / "workspace.sqlite3")
     uploads = Uploads(root / "uploads", store)
-    usage = UsageTotals()
+    usage = UsageTotals(store)
     execution = Execution(store, runner or ProcessRunner(), root, usage=usage)
 
     def clean(owner):
@@ -182,6 +197,7 @@ def create_jobs(root: Path, *, runner=None, cleanup=None) -> Jobs:
             "execution": execution,
             "cleanup": cleanup or clean,
             "usage": usage,
+            "song_search": partial(search_songs, get=httpx.get),
         },
     )
 

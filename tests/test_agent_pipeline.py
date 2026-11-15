@@ -89,6 +89,45 @@ def test_zero_candidates_still_produces_manifest(tmp_path, monkeypatch, pipeline
     assert json.loads(path.read_text())["exported_count"] == 0
 
 
+def test_partial_scan_persists_recognized_candidates_before_reporting_failure(tmp_path, monkeypatch, pipeline):
+    async def recognize(*args, **kwargs):
+        return {"shazam": {"status": "matched", "title": "Song", "artist": "Singer"}}
+
+    install_services(monkeypatch, [Candidate(1, 10, 90, "host_singing", 0.99, True, "", "")], recognize)
+    monkeypatch.setattr(
+        agent,
+        "scan_candidates",
+        lambda *a, **k: (
+            [Candidate(1, 10, 90, "host_singing", 0.99, True, "", "")],
+            [{"chunk": 2, "state": "failed", "error": "invalid boundary"}],
+        ),
+    )
+    media = tmp_path / "source.mp4"
+    media.touch()
+    output = tmp_path / "out"
+    with pytest.raises(ValueError, match="invalid boundary"):
+        asyncio.run(agent.run_agent(media, output, analysis_only=True))
+    result = json.loads((output / "source_music_agent.json").read_text(encoding="utf-8"))
+    assert result["candidates"][0]["singing_intervals"][0]["title"] == "Song"
+    assert result["chunks"][0]["state"] == "failed"
+
+
+def test_analysis_only_recognizes_without_exporting(tmp_path, monkeypatch, pipeline):
+    async def recognize(*args, **kwargs):
+        return {"shazam": {"status": "matched", "title": "Song", "artist": "Singer"}}
+
+    install_services(monkeypatch, [Candidate(1, 10, 90, "host_singing", 0.99, True, "", "")], recognize)
+    monkeypatch.setattr(agent, "export_video", lambda *args: pytest.fail("analysis must not encode video"))
+    media = tmp_path / "source.mp4"
+    media.touch()
+    manifest = asyncio.run(agent.run_agent(media, tmp_path / "out", analysis_only=True))
+    result = json.loads(manifest.read_text(encoding="utf-8"))
+    interval = result["candidates"][0]["singing_intervals"][0]
+    assert interval["title"] == "Song"
+    assert "file" not in interval
+    assert result["exported_count"] == 0
+
+
 def test_prepare_and_finalize_reach_terminal_state(monkeypatch, tmp_path):
     """计数步骤必须落到终态；只累加 completed 会让界面永远显示进行中。"""
     import asyncio

@@ -1,29 +1,26 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+import { DEFAULT_NAVIGATION, parseNavigation, serializeNavigation, type Navigation } from './navigation';
 
-const DEFAULTS = { page: '工作台', view: '导入与设置', source: '本地文件', history: '', historyView: '队列与进度', output: '结果', job: '', query: '', status: 'all', usage: '' };
-export type NavigationState = typeof DEFAULTS;
-function read(): NavigationState {
-  if (typeof window === 'undefined') return DEFAULTS;
-  const query = new URLSearchParams(window.location.search);
-  return Object.fromEntries(Object.entries(DEFAULTS).map(([key, value]) => [key, query.get(key) ?? value])) as NavigationState;
-}
+/**
+ * URL is the single source of navigation state. The hook keeps a shadow copy only to
+ * re-render, and always re-parses the URL so back/forward stays authoritative.
+ */
 export function useNavigation() {
-  const [navigation, setNavigation] = useState(DEFAULTS);
+  const [navigation, setNavigation] = useState<Navigation>(DEFAULT_NAVIGATION);
   useEffect(() => {
-    const restore = () => setNavigation(read());
-    restore(); window.addEventListener('popstate', restore); window.addEventListener('bms-navigation', restore);
-    return () => { window.removeEventListener('popstate', restore); window.removeEventListener('bms-navigation', restore); };
+    const restore = () => setNavigation(parseNavigation(window.location.search));
+    restore();
+    window.addEventListener('popstate', restore);
+    return () => window.removeEventListener('popstate', restore);
   }, []);
-  const navigate = useCallback((changes: Partial<NavigationState>) => {
-    const next = { ...read(), ...changes };
+  const navigate = useCallback((changes: Partial<Navigation>) => {
+    const next = parseNavigation(serializeNavigation(changes, parseNavigation(window.location.search)));
+    const query = serializeNavigation(next);
     const url = new URL(window.location.href);
-    for (const [key, value] of Object.entries(next)) {
-      if (value === DEFAULTS[key as keyof NavigationState]) url.searchParams.delete(key);
-      else url.searchParams.set(key, value);
-    }
+    url.search = query;
     window.history.pushState(null, '', url.pathname + url.search + url.hash);
-    setNavigation(next); window.dispatchEvent(new Event('bms-navigation'));
+    setNavigation(next);
   }, []);
   return { navigation, navigate };
 }

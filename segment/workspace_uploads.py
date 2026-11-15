@@ -98,6 +98,8 @@ class Uploads:
 
     def remove(self, identity: str, *, excluding_job: str | None = None) -> None:
         with self._lock:
+            if any(project["upload_id"] == identity for project in self.store.list("projects")):
+                raise ValueError("Source is referenced by an editor project")
             if identity in self._receiving:
                 raise ValueError("请先取消正在进行的上传")
             if any(

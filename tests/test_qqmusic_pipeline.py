@@ -81,6 +81,34 @@ def test_provider_errors_still_fail_the_interval(monkeypatch):
         identify(monkeypatch, {"shazam": {"status": "error", "error": "timeout"}})
 
 
+@pytest.mark.parametrize("matched,failed", [("shazam", "netease"), ("netease", "shazam")])
+def test_matching_provider_keeps_interval_successful_when_other_provider_errors(monkeypatch, matched, failed):
+    result = identify(
+        monkeypatch,
+        {
+            matched: {"status": "matched", "title": "晴天", "artist": "周杰伦"},
+            failed: {"status": "error", "error": "timeout"},
+        },
+    )
+    assert result["title"] == "晴天"
+    assert result["recognition"][failed]["error"] == "timeout"
+
+
+def test_real_recognition_aggregates_match_and_provider_exception(monkeypatch):
+    from segment.music_agent import recognition
+
+    async def failed(*args):
+        raise TimeoutError("request timed out")
+
+    monkeypatch.setattr(recognition, "_run_shazam", failed)
+    monkeypatch.setattr(
+        recognition, "_netease_blocking", lambda *args: {"status": "matched", "title": "晴天", "artist": "周杰伦"}
+    )
+    result = asyncio.run(recognition.recognize_audio(Path("audio.mp3")))
+    assert result["netease"]["title"] == "晴天"
+    assert result["shazam"]["status"] == "error"
+
+
 @pytest.mark.parametrize(
     "recognize_result,title",
     [

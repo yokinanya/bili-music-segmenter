@@ -58,6 +58,7 @@ class Runtime:
     def __init__(self, config: dict, report: Callable = emit_event):
         self.config = config
         self.report = report
+        self.result_store = None
         self.root = Path(config["checkpoint_dir"])
         self.root.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
@@ -128,7 +129,7 @@ class Runtime:
         stamp = fingerprint([PIPELINE_VERSION, self.config["source_digest"], spec.get("input")])
         self._stamps[identity] = stamp
         path = self.root / f"{fingerprint(identity)}.json"
-        cached = self._cached(path, stamp, spec) if spec.get("cache", True) else None
+        cached = self._load_result(path, stamp, spec)
         if cached is not None:
             self.event(
                 identity,
@@ -144,8 +145,7 @@ class Runtime:
         try:
             with self.activate(identity):
                 value = work()
-            if spec.get("cache", True):
-                atomic_write_json(path, {"stamp": stamp, "value": value})
+            self._save_result(path, stamp, spec, value=value)
         except Exception as error:
             self.event(identity, label, state="failed", error=str(error), finished_at=now())
             raise
@@ -165,7 +165,7 @@ class Runtime:
         stamp = fingerprint([PIPELINE_VERSION, self.config["source_digest"], spec.get("input")])
         self._stamps[identity] = stamp
         path = self.root / f"{fingerprint(identity)}.json"
-        cached = self._cached(path, stamp, spec)
+        cached = self._load_result(path, stamp, spec)
         if cached is not None:
             self.event(identity, label, state="reused", completed=1, total=1, finished_at=now())
             return cached["value"]
@@ -174,7 +174,7 @@ class Runtime:
         try:
             with self.activate(identity):
                 value = await work()
-            atomic_write_json(path, {"stamp": stamp, "value": value})
+            self._save_result(path, stamp, spec, value=value)
         except Exception as error:
             self.event(identity, label, state="failed", error=str(error), finished_at=now())
             raise
@@ -188,6 +188,35 @@ class Runtime:
             finished_at=now(),
         )
         return value
+
+    def _load_result(self, path: Path, stamp: str, spec: dict) -> dict | None:
+        if not spec.get("cache", True) or self.config.get("refresh_recognition"):
+            return None
+        local = self._cached(path, stamp, spec)
+        if local is not None or not spec.get("shared") or self.result_store is None:
+            return local
+        try:
+            cached = self.result_store.get("recognition_results", fingerprint([spec["id"], stamp]))
+        except KeyError:
+            return None
+        validate = spec.get("validate")
+        return cached if not validate or validate(cached["value"]) else None
+
+    def _save_result(self, path: Path, stamp: str, spec: dict, *, value: Any) -> None:
+        if not spec.get("cache", True):
+            return
+        cached = {"stamp": stamp, "value": value}
+        atomic_write_json(path, cached)
+        if spec.get("shared") and self.result_store is not None:
+            self.result_store.put(
+                "recognition_results",
+                {
+                    **cached,
+                    "id": fingerprint([spec["id"], stamp]),
+                    "source_digest": self.config["source_digest"],
+                    "created_at": now(),
+                },
+            )
 
     @staticmethod
     def _cached(path: Path, stamp: str, spec: dict) -> dict | None:
@@ -211,5 +240,6 @@ def create_runtime(media: Path, output: Path, options: dict) -> Runtime:
             "attempt": int(os.getenv("MUSIC_AGENT_ATTEMPT", "1")),
             "owner": os.getenv("MUSIC_AGENT_JOB_ID", str(output.resolve())),
             "state_dir": os.getenv("MUSIC_AGENT_STATE_DIR", str(output / ".runtime")),
+            "refresh_recognition": os.getenv("MUSIC_AGENT_REFRESH_RECOGNITION", "false") == "true",
         }
     )

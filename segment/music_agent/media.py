@@ -13,6 +13,39 @@ def run_command(command: list[str]) -> str:
     return subprocess.run(command, check=True, capture_output=True, text=True).stdout.strip()
 
 
+def reencode_cut_command(media: Path, start: float, end: float, destination: Path) -> list[str]:
+    return [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-ss",
+        f"{start:.3f}",
+        "-i",
+        str(media),
+        "-t",
+        f"{end - start:.3f}",
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "24",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-movflags",
+        "+faststart",
+        str(destination),
+    ]
+
+
 def media_duration(media: Path) -> float:
     return float(
         run_command(
@@ -117,37 +150,8 @@ def extract_recognition_audio(media: Path, start: float, end: float, destination
 
 
 def export_video(media: Path, start: float, end: float, destination: Path) -> None:
-    run_command(
-        [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-ss",
-            f"{start:.3f}",
-            "-i",
-            str(media),
-            "-t",
-            f"{end - start:.3f}",
-            "-map",
-            "0:v:0",
-            "-map",
-            "0:a:0",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-crf",
-            "24",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "128k",
-            "-movflags",
-            "+faststart",
-            str(destination),
-        ]
-    )
+    from segment.music_agent.media_process import execute_media
+
+    execute_media(reencode_cut_command(media, start, end, destination), end - start)
     if not destination.is_file() or destination.stat().st_size == 0:
         raise RuntimeError(f"导出视频为空：{destination}")

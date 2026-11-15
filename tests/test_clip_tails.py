@@ -34,6 +34,32 @@ def test_tail_extends_two_seconds_and_keeps_original_evidence():
     assert source == before
 
 
+def test_overlapping_candidates_with_confirmed_same_song_merge_before_tail_extension():
+    source = [record(1, (2293, 2430)), record(2, (2370, 2504))]
+    for item in source:
+        interval = item["singing_intervals"][0]
+        interval.update(
+            title="空空",
+            title_resolution={"status": "single_provider"},
+            recognition={"netease": {"status": "matched", "title": "空空"}},
+        )
+    before = copy.deepcopy(source)
+    result = extend_clip_tails(source, 5855)
+    intervals = [interval for item in result for interval in item["singing_intervals"]]
+    assert len(intervals) == 1
+    assert (intervals[0]["start_seconds"], intervals[0]["end_seconds"]) == (2293, 2506)
+    assert len(intervals[0]["merged_intervals"]) == 2
+    assert source == before
+
+
+def test_overlapping_equal_titles_without_recognition_are_not_automatically_merged():
+    source = [record(1, (10, 30)), record(2, (20, 40))]
+    for item in source:
+        item["singing_intervals"][0]["title"] = "同名提示"
+    with pytest.raises(ValueError, match="重叠"):
+        extend_clip_tails(source, 100)
+
+
 @pytest.mark.parametrize("end,expected", [(98.75, 100), (100, 100)])
 def test_tail_stops_at_media_end(end, expected):
     result = extend_clip_tails([record(1, (80, end))], 100)

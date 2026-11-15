@@ -11,7 +11,6 @@ from contextvars import ContextVar
 from segment.music_agent.runtime import CURRENT, PROGRESS_INTERVAL_SECONDS, fingerprint
 
 MICROSECONDS_PER_SECOND = 1_000_000
-AUTOMATIC_THREADS = 0
 MEDIA_PROGRESS: ContextVar[Callable | None] = ContextVar("media_progress", default=None)
 
 
@@ -24,13 +23,22 @@ def reporting_media(progress: Callable):
         MEDIA_PROGRESS.reset(token)
 
 
+def _thread_arguments(command: list[str], threads: int | None) -> list[str]:
+    """把 `-threads` 放到每个输出选项组之前。
+
+    ffmpeg 的线程数是输出选项，必须出现在对应编码器参数之前才生效；
+    直接追加到命令末尾会被忽略，导出只能跑在单线程效率上。
+    """
+    if threads is None:
+        return list(command)
+    return ["-threads", str(threads), *command]
+
+
 def execute_media(command: list[str], duration: float) -> None:
     scope = CURRENT.get()
     budget = scope.runtime.resource("media") if scope else nullcontext()
-    threads = scope.runtime.config["media_threads"] if scope else AUTOMATIC_THREADS
-    invocation = [command[0], "-progress", "pipe:1", "-nostats", "-threads", str(threads), *command[1:]]
-    # FFmpeg's output codec also needs an explicit thread budget.
-    invocation[-1:-1] = ["-threads", str(threads)]
+    threads = scope.runtime.config["media_threads"] if scope else None
+    invocation = [command[0], "-progress", "pipe:1", "-nostats", *_thread_arguments(command[1:], threads)]
     with budget:
         with subprocess.Popen(invocation, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
             _read_progress(process, duration, command)
@@ -50,6 +58,15 @@ def _read_progress(process, duration: float, command: list[str]) -> None:
     label = "导出片段" if "libx264" in command else "提取音频"
     for line in process.stdout:
         key, _, value = line.strip().partition("=")
+        if key == "progress" and value == "end" and progress:
+            progress(
+                {
+                    "stage": "finalizing",
+                    "completed_seconds": duration,
+                    "total_seconds": duration,
+                    "elapsed_seconds": time.monotonic() - started,
+                }
+            )
         if key != "out_time_us" or value == "N/A":
             continue
         elapsed = time.monotonic()

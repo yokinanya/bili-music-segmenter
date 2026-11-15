@@ -64,9 +64,9 @@ export function Field({ onChange, step = '1', min = '0', ...props }: FieldProps)
       if (valid) onChange(value);
     } });
 }
-export function Switch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
+export function Switch({ label, checked, onChange, disabled = false }: { label: string; checked: boolean; onChange: (value: boolean) => void; disabled?: boolean }) {
   return <label className='switch-row'><span>{label}</span>{createElement('md-switch', {
-    selected: checked, 'aria-label': label,
+    selected: checked, disabled, 'aria-label': label,
     onChange: (event: Event) => onChange((event.target as HTMLElement & { selected: boolean }).selected),
   })}</label>;
 }
@@ -96,8 +96,8 @@ export function Slider({ label, onChange, step = 1, ...props }: SliderProps) {
     onInput: (event: Event) => onChange((event.target as HTMLElement & { value: number }).value),
   });
 }
-export function MaterialDialog({ open, title, children, onClose, dismissible = true }: {
-  open: boolean; title: string; children: ReactNode; onClose: () => void; dismissible?: boolean;
+export function MaterialDialog({ open, title, children, onClose, dismissible = true, actions }: {
+  open: boolean; title: string; children: ReactNode; onClose: () => void; dismissible?: boolean; actions?: ReactNode;
 }) {
   const reduced = useReducedMotion();
   const ref = useRef<HTMLElement & { open: boolean; show: () => Promise<void>; close: () => Promise<void> }>(null);
@@ -112,5 +112,5 @@ export function MaterialDialog({ open, title, children, onClose, dismissible = t
     getOpenAnimation: () => dialogAnimation({ opening: true, reduced }),
     getCloseAnimation: () => dialogAnimation({ opening: false, reduced }),
   },
-    <div slot='headline'>{title}</div>, <div slot='content'>{children}</div>);
+    <div slot='headline'>{title}</div>, <div slot='content'>{children}</div>, actions && <div slot='actions'>{actions}</div>);
 }

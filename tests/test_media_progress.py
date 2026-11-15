@@ -18,14 +18,20 @@ def process(*, returncode=0, errors=""):
     return child
 
 
-def test_manual_export_uses_automatic_threads_and_real_measured_progress(monkeypatch):
+def thread_positions(invocation: list[str]) -> list[int]:
+    """`-threads` 必须出现在输出编码器之前才会生效。"""
+    return [index for index, value in enumerate(invocation) if value == "-threads"]
+
+
+def test_manual_export_omits_thread_flag_so_ffmpeg_auto_scales(monkeypatch):
+    """没有任务上下文时不要传 `-threads`，否则会把 ffmpeg 限制成手动模式。"""
     popen = Mock(return_value=process())
     monkeypatch.setattr(media_process.subprocess, "Popen", popen)
     updates = []
     with media_process.reporting_media(updates.append):
         media_process.execute_media(["ffmpeg", "-c:v", "libx264", "clip.mp4"], 1)
     invocation = popen.call_args.args[0]
-    assert [invocation[index + 1] for index, value in enumerate(invocation) if value == "-threads"] == ["0", "0"]
+    assert thread_positions(invocation) == []
     assert updates[0]["completed_seconds"] == 0.5 and updates[0]["total_seconds"] == 1
     assert updates[0]["stage"] == "encoding"
     assert media_process.MEDIA_PROGRESS.get() is None
@@ -44,7 +50,10 @@ def test_task_exports_keep_the_existing_resource_and_thread_budget(monkeypatch):
     finally:
         media_process.CURRENT.reset(token)
     invocation = popen.call_args.args[0]
-    assert [invocation[index + 1] for index, value in enumerate(invocation) if value == "-threads"] == ["3", "3"]
+    positions = thread_positions(invocation)
+    assert [invocation[index + 1] for index in positions] == ["3"]
+    # 必须在编码器参数之前，否则 ffmpeg 会忽略该线程数。
+    assert positions[0] < invocation.index("-c:v")
     runtime.resource.assert_called_once_with("media")
     assert runtime.event.call_args.kwargs["state"] == "succeeded"
 

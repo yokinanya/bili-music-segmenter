@@ -52,6 +52,7 @@ def test_json_call_sends_inline_audio_and_reads_usage(tmp_path, monkeypatch):
     assert captured["input"][0]["type"] == "audio"
     assert captured["input"][0]["mime_type"] == "audio/wav"
     assert captured["input"][0]["data"] == "UklGRjAwMDA="
+    assert captured["generation_config"] == {"thinking_level": "high"}
 
 
 def test_json_call_rejects_empty_output(tmp_path):
@@ -64,6 +65,43 @@ def test_json_call_rejects_empty_output(tmp_path):
     wav.write_bytes(b"x")
     with pytest.raises(ValueError, match="空响应"):
         client.json_call(wav, "p", {"type": "object"})
+
+
+def test_correction_request_can_bypass_invalid_cached_response(tmp_path):
+    from segment.music_agent.runtime import Runtime
+
+    responses = iter(['{"segments": [{"start_seconds": 900}]}', '{"segments": []}'])
+    client = object.__new__(gemini.GeminiClient)
+    client.model = "model-a"
+    client._client = SimpleNamespace(
+        interactions=SimpleNamespace(create=lambda **kwargs: SimpleNamespace(output_text=next(responses), usage=None))
+    )
+    runtime = Runtime({"checkpoint_dir": str(tmp_path), "source_digest": "s", "attempt": 1}, report=lambda *a: None)
+    with runtime.activate():
+        assert client.json_call(None, "p", {})["data"]["segments"]
+        assert client.json_call(None, "p", {}, cache=False)["data"] == {"segments": []}
+
+
+def test_malformed_response_records_status_and_usage_without_logging_content(monkeypatch, caplog):
+    events = []
+    monkeypatch.setattr(gemini, "report_usage", lambda *args: events.append(args))
+    client = object.__new__(gemini.GeminiClient)
+    client.model = "model-a"
+    client._client = SimpleNamespace(
+        interactions=SimpleNamespace(
+            create=lambda **kwargs: SimpleNamespace(
+                id="response-123",
+                status="incomplete",
+                output_text='{"private-song": "',
+                usage=SimpleNamespace(total_input_tokens=100, total_output_tokens=5, total_cached_tokens=0),
+            )
+        )
+    )
+    with pytest.raises(ValueError, match="incomplete"):
+        client.json_call(None, "p", {})
+    assert len(events) == 1 and events[0][1]["total_input_tokens"] == 100
+    assert "response-123" in caplog.text and "incomplete" in caplog.text
+    assert "private-song" not in caplog.text
 
 
 def test_oversized_audio_uses_files_api_and_cleans_up(tmp_path):

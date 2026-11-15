@@ -1,4 +1,4 @@
-import type { Bootstrap, HistoryEntry, JobStatus, LogChunk, RunOptions, SourceAsset, UsageSnapshot } from './types';
+import type { Bootstrap, JobStatus, LogChunk, RunOptions, SourceAsset, UsageSnapshot } from './types';
 import { readClipEdit } from './clipEditStream';
 const TOKEN_KEY = 'bms-token';
 function readToken(): string {
@@ -19,6 +19,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 const post = <T>(path: string, data: unknown = {}) => request<T>(path, { method: 'POST', body: JSON.stringify(data) });
 export const api = {
+  saveDefaults: (options: RunOptions) => request<{ options: RunOptions }>('/api/settings/task-defaults', { method: 'PUT', body: JSON.stringify(options) }),
   editClip: async (job: string, clip: string, options: {
     data: import('./types').ClipEdit; update: (value: import('./types').ClipEditProgress) => void;
   }) => readClipEdit(await fetch(`/api/jobs/${job}/clip/${clip}`, {
@@ -36,9 +37,8 @@ export const api = {
   stop: (id: string) => post(`/api/jobs/${id}/stop`),
   retry: (id: string) => post<{ id: string }>(`/api/jobs/${id}/retry`),
   delete: (id: string) => request(`/api/jobs/${id}`, { method: 'DELETE' }),
-  history: () => request<{ entries: HistoryEntry[] }>('/api/history'),
-  usage: () => request<UsageSnapshot>('/api/usage'),
-  log: (id: string, index: number, offset: number) => request<LogChunk>(`/api/jobs/${id}/log`, { headers: { 'X-Log-Item': String(index), 'X-Log-Offset': String(offset) } }),
+  clearHistory: () => post<{ removedJobs: number; removedLegacy: number }>('/api/history/clear'),
+  usage: () => request<UsageSnapshot>('/api/usage'),  log: (id: string, index: number, offset: number) => request<LogChunk>(`/api/jobs/${id}/log`, { headers: { 'X-Log-Item': String(index), 'X-Log-Offset': String(offset) } }),
 };
 export function downloadUrl(id: string, action: string, download = false): string {
   return `/api/jobs/${id}/${action}?${new URLSearchParams({ token, ...(download ? { download: '1' } : {}) })}`;
