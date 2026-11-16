@@ -54,6 +54,7 @@ function useTransport({ onTime, onSeek, onError, registerVideo }: Props) {
 }
 
 export function PreviewTransport(props: Props) {
+  const playbackBoundary = useRef<number | null>(null);
   const transport = useTransport(props);
   const { video, bar, state, setState, phase, setPhase, attach, play, seek, pointer } = transport;
   usePreviewSource(video, { src: props.src, type: props.type, duration: props.duration,
@@ -66,9 +67,10 @@ export function PreviewTransport(props: Props) {
   const percent = progressFraction(state.time, state.duration) * 100;
   const updateTime = (element: HTMLVideoElement) => {
     let time = element.currentTime;
-    if (!element.paused && !element.seeking && props.stopAt !== undefined && time >= props.stopAt) {
+    if (!element.paused && !element.seeking && playbackBoundary.current !== null && time >= playbackBoundary.current) {
       element.pause();
-      time = props.stopAt;
+      time = playbackBoundary.current;
+      playbackBoundary.current = null;
       element.currentTime = time;
     }
     setState(current => ({ ...current, time }));
@@ -79,7 +81,10 @@ export function PreviewTransport(props: Props) {
       {props.src ? <video ref={attach} playsInline preload="metadata"
         onLoadedMetadata={metadata} onCanPlay={() => setPhase('ready')} onWaiting={() => setPhase('waiting')}
         onTimeUpdate={event => updateTime(event.currentTarget)}
-        onPlay={() => setState(current => ({ ...current, intent: 'playing', pending: true }))}
+        onPlay={event => {
+          playbackBoundary.current = props.stopAt !== undefined && event.currentTarget.currentTime < props.stopAt ? props.stopAt : null;
+          setState(current => ({ ...current, intent: 'playing', pending: true }));
+        }}
         onPlaying={() => { setPhase('ready'); setState(current => ({ ...current, intent: 'playing', pending: false })); }}
         onPause={() => setState(current => ({ ...current, intent: 'paused', pending: false }))}
         onEnded={() => setState(current => ({ ...current, intent: 'paused', pending: false }))}

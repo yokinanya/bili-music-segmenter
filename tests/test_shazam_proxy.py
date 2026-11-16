@@ -32,8 +32,8 @@ def test_proxy_client_forwards_proxy(monkeypatch):
     monkeypatch.setattr(shazam.HTTPClient, "request", fake_request)
     monkeypatch.setattr(shazam.HTTPClient, "request_text", fake_request_text)
     http = shazam.ShazamProxyClient("http://127.0.0.1:7890")
-    asyncio.run(http.request("POST", "https://example.test"))
-    asyncio.run(http.request_text("https://example.test", content_type="text/csv"))
+    asyncio.run(http.request("POST", "https://example.test", proxy=None))
+    asyncio.run(http.request_text("https://example.test", content_type="text/csv", proxy="http://other.example"))
     assert seen == [("POST", "http://127.0.0.1:7890"), ("GET", "http://127.0.0.1:7890")]
 
 
@@ -43,11 +43,12 @@ def test_proxy_client_disables_environment_proxy():
     async def run():
         built = client.http_client._ensure_client()
         try:
-            return built._client.trust_env
+            trust_env = built._client.trust_env
         finally:
             await client.close()
+        return trust_env, built._client.closed
 
-    assert asyncio.run(run()) is False
+    assert asyncio.run(run()) == (False, True)
 
 
 def test_shazam_proxy_requires_scheme(monkeypatch):

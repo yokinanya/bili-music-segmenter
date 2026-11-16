@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { api, transfer } from './api';
 import { editorApi, type Waveform } from './editorApi';
-import { editHistory, mergeClips, removeProject, splitClip, type EditorProject, type SongClip } from './editor';
+import { editHistory, removeProject, splitClip, type EditorProject, type SongClip } from './editor';
 import { errorText } from './format';
 import { selectionAtTime } from './playheadSelection';
 import { selectSongRange } from './rangeSelection';
@@ -11,6 +11,7 @@ export function useSongEditor() {
   const [projects, setProjects] = useState<EditorProject[]>([]), [project, setProject] = useState<EditorProject | null>(null);
   const [history, dispatch] = useReducer(editHistory, { past: [], present: [], future: [] });
   const [selected, setSelected] = useState<string[]>([]), [time, setTime] = useState(0);
+  const [marks, setMarks] = useState<{ start: number | null; end: number | null }>({ start: null, end: null });
   const [waveform, setWaveform] = useState<Waveform | null>(null), [error, setError] = useState('');
   const [busy, setBusy] = useState(''), [notice, setNotice] = useState(''), [waveError, setWaveError] = useState('');
   const [importProgress, setImportProgress] = useState<{ name: string; index: number; count: number; sent: number; size: number; stage: 'registering' | 'uploading' | 'probing' } | null>(null);
@@ -35,6 +36,7 @@ export function useSongEditor() {
     preserveSelection.current = false;
     selectionAnchor.current = null;
     setProject(value); dispatch({ type: 'open', clips: value.clips }); setSelected([]); setTime(0); setWaveform(null); setWaveError('');
+    setMarks({ start: null, end: null });
     localStorage.setItem('bms-editor-project', value.id);
     void editorApi.waveform(value.id).then(data => { if (sequence === openSequence.current) setWaveform(data); })
       .catch(cause => { if (sequence === openSequence.current) setWaveError(errorText(cause)); });
@@ -86,20 +88,16 @@ export function useSongEditor() {
   });
   const change = (clips: SongClip[]) => dispatch({ type: 'replace', clips });
   const add = () => {
-    if (!project || time >= project.duration) return;
-    const nextBoundary = history.present.filter(c => c.start_seconds > time).sort((a, b) => a.start_seconds - b.start_seconds)[0]?.start_seconds ?? project.duration;
+    if (!project || marks.start === null || marks.end === null || marks.start >= marks.end) return;
     const id = crypto.randomUUID();
-    change([...history.present, { id, start_seconds: time, end_seconds: nextBoundary, title: '', artist: '', name: `song-${history.present.length + 1}.mp4` }]); setSelected([id]);
+    change([...history.present, { id, start_seconds: marks.start, end_seconds: marks.end, title: '', artist: '', name: `song-${history.present.length + 1}.mp4` }]);
+    setSelected([id]); preserveSelection.current = true; setMarks({ start: null, end: null });
   };
+  const splitTarget = history.present.find(c => selected.includes(c.id) && c.start_seconds < time && time < c.end_seconds);
   const split = () => {
-    const clip = history.present.find(c => c.id === selected[0]);
+    const clip = splitTarget;
     if (!clip) return;
     try { change(history.present.flatMap(c => c.id === clip.id ? splitClip(c, time, crypto.randomUUID()) : [c])); setError(''); }
-    catch (cause) { setError(errorText(cause)); }
-  };
-  const merge = () => {
-    const clips = history.present.filter(c => selected.includes(c.id));
-    try { const merged = mergeClips(clips); change([...history.present.filter(c => !selected.includes(c.id)), merged]); setSelected([merged.id]); }
     catch (cause) { setError(errorText(cause)); }
   };
   const select = (id: string, multi: boolean) => {
@@ -114,5 +112,7 @@ export function useSongEditor() {
     if (selectionAnchor.current === null) selectionAnchor.current = id;
   };
   const locateBoundary = (value: number) => { preserveSelection.current = true; setTime(value); };
-  return { projects, project, history, dispatch, selected, setSelected, time, setTime: updateTime, seekTime: (value: number) => updateTime(value, true), locateBoundary, waveform, waveError, error, setError, busy, importProgress, notice, setNotice, run, open: switchProject, importFiles, remove, save, change, add, split, merge, select, selectRange };
+  return { projects, project, history, dispatch, selected, setSelected, time, setTime: updateTime, seekTime: (value: number) => updateTime(value, true), locateBoundary, waveform, waveError, error, setError, busy, importProgress, notice, setNotice, run, open: switchProject, importFiles, remove, save, change, add, split, select, selectRange,
+    marks, markIn: () => setMarks(value => ({ ...value, start: time })), markOut: () => setMarks(value => ({ ...value, end: time })),
+    clearMarks: () => setMarks({ start: null, end: null }), canSplit: !!splitTarget };
 }

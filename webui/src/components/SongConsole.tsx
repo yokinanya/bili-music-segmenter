@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useSongEditor } from '@/lib/useSongEditor';
-import type { EditorProject } from '@/lib/editor';
+import { mergeClips, type EditorProject, type SongClip } from '@/lib/editor';
 import { sourceUrl } from '@/lib/editorApi';
 import { previewType } from '@/lib/previewMedia';
 import { mediaTime as clock, errorText } from '@/lib/format';
@@ -12,6 +12,7 @@ import { SongTasks, type TaskDialogMode } from './SongTasks';
 import { PreviewTransport } from './PreviewTransport';
 import { Button, MaterialDialog, Progress } from './Material';
 import { Icon } from './Icon';
+import { MergeClipsDialog } from './MergeClipsDialog';
 import { previewSpaceAction } from '@/lib/previewSpace';
 import { isInterruption } from '@/lib/playback';
 import './song-console.css';
@@ -19,6 +20,7 @@ import './song-console.css';
 export function SongConsole({ toolbarTarget }: { toolbarTarget: HTMLElement | null }) {
   const editor = useSongEditor(), video = useRef<HTMLVideoElement>(null), [taskMode, setTaskMode] = useState<TaskDialogMode>(null);
   const [pendingDelete, setPendingDelete] = useState<EditorProject | null>(null);
+  const [pendingMerge, setPendingMerge] = useState<SongClip[] | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const registerVideo = useCallback((element: HTMLVideoElement | null) => { video.current = element; }, []);
   const clip = editor.history.present.find(value => value.id === editor.selected[0]);
@@ -26,28 +28,45 @@ export function SongConsole({ toolbarTarget }: { toolbarTarget: HTMLElement | nu
   const toggle = () => { if (!video.current) return; if (video.current.paused) void video.current.play().catch(cause => { if (!isInterruption(cause)) editor.setError(errorText(cause)); }); else video.current.pause(); };
   useEffect(() => {
     const keyboard = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing || event.altKey || event.composedPath().some(target => target instanceof HTMLElement && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable))) return;
+      const editing = event.composedPath().some(target => target instanceof HTMLElement && (
+        ['INPUT', 'TEXTAREA', 'SELECT', 'MD-OUTLINED-TEXT-FIELD', 'MD-FILLED-TEXT-FIELD', 'MD-OUTLINED-SELECT'].includes(target.tagName)
+        || target.isContentEditable || target.getAttribute('role') === 'textbox'));
+      if (event.isComposing) return;
+      if (event.code === 'Space') {
+        if (previewSpaceAction({ editing, blocked: !!document.querySelector('md-dialog[open], dialog[open], [role="dialog"][aria-modal="true"]')
+          || !!document.querySelector('.editor-view[hidden] .song-console:not([hidden])') }) === 'native') return;
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (event.type === 'keydown' && !event.repeat) {
+          const focused = document.activeElement;
+          if (focused instanceof HTMLElement && focused.closest('.timeline-floating-tools')
+            && focused.matches('button, [role="button"]')) focused.blur();
+          toggle();
+        }
+        return;
+      }
+      if (event.type === 'keyup') return;
+      if (event.defaultPrevented || event.altKey || editing) return;
       if (event.ctrlKey || event.metaKey) {
         if (event.key.toLowerCase() === 'z') { event.preventDefault(); editor.dispatch({ type: event.shiftKey ? 'redo' : 'undo' }); }
         return;
       }
-      if (event.code === 'Space') {
-        const path = event.composedPath().filter((target): target is HTMLElement => target instanceof HTMLElement);
-        if (previewSpaceAction({ editing: false, button: path.some(target => target.tagName === 'BUTTON'),
-          adjustment: path.some(target => target.classList.contains('boundary-nudge')),
-          blocked: !!document.querySelector('md-dialog[open]') || !!document.querySelector('.editor-view[hidden] .song-console:not([hidden])') }) === 'native') return;
-        event.preventDefault();
-        if (!event.repeat) toggle();
-      }
+      if (document.querySelector('md-dialog[open]')) return;
       if (event.key.toLowerCase() === 's' && !event.ctrlKey && !event.metaKey) editor.split();
+      if (event.key === '[') { event.preventDefault(); editor.markIn(); }
+      if (event.key === ']') { event.preventDefault(); editor.markOut(); }
+      if (event.key === 'Enter' && !event.composedPath().some(target => target instanceof HTMLElement && target.tagName === 'BUTTON')
+        && editor.marks.start !== null && editor.marks.end !== null && editor.marks.start < editor.marks.end) {
+        event.preventDefault(); editor.add();
+      }
       if (!clip) return;
       const key = event.key.toLowerCase();
       if (key === 'i' && editor.time < clip.end_seconds) editor.change(editor.history.present.map(c => c.id === clip.id ? { ...c, start_seconds: editor.time } : c));
       if (key === 'o' && editor.time > clip.start_seconds) editor.change(editor.history.present.map(c => c.id === clip.id ? { ...c, end_seconds: editor.time } : c));
     };
-    window.addEventListener('keydown', keyboard, true); return () => window.removeEventListener('keydown', keyboard, true);
+    window.addEventListener('keydown', keyboard, true);
+    window.addEventListener('keyup', keyboard, true);
+    return () => { window.removeEventListener('keydown', keyboard, true); window.removeEventListener('keyup', keyboard, true); };
   });
-  const dirty = !!editor.project && JSON.stringify(editor.project.clips) !== JSON.stringify(editor.history.present);
   const importInput = () => <input type="file" multiple accept="video/*,audio/*,.mkv,.flv,.ts" hidden disabled={!!editor.busy} onChange={e => { void editor.importFiles(Array.from(e.target.files ?? [])); e.target.value = ''; }} />;
   return <div className="song-console">
     {toolbarTarget && createPortal(<>
@@ -86,30 +105,35 @@ export function SongConsole({ toolbarTarget }: { toolbarTarget: HTMLElement | nu
           stopAt={clip?.end_seconds}
           onTime={editor.setTime} onSeek={editor.seekTime} onError={editor.setError} registerVideo={registerVideo} />
       </section>
-      <SongProperties clip={clip} duration={editor.project?.duration ?? 0} onChange={value => editor.change(editor.history.present.map(c => c.id === value.id ? value : c))}
-        onLocate={value => { video.current?.pause(); if (video.current) video.current.currentTime = value; editor.locateBoundary(value); }} />
+      <SongProperties clip={clip} onChange={value => editor.change(editor.history.present.map(c => c.id === value.id ? value : c))} />
     </div>
-    {editor.project && <SongTasks key={editor.project.id} project={{ ...editor.project, clips: editor.history.present }} selected={editor.selected} save={editor.save} apply={clips => editor.change([...editor.history.present, ...clips])} mode={taskMode} onClose={() => setTaskMode(null)} />}
+    {editor.project && <SongTasks key={editor.project.id} project={{ ...editor.project, clips: editor.history.present }} selected={editor.selected} save={editor.save} apply={clips => editor.change([...editor.history.present, ...clips])} mode={taskMode} onClose={() => setTaskMode(null)} onOpenExport={() => setTaskMode('export')} />}
     </div>
     <MaterialDialog open={!!pendingDelete} title="删除素材？" onClose={() => setPendingDelete(null)}>
       <p>将删除「{pendingDelete?.name}」及其歌曲区间草稿，磁盘上的源文件与已导出视频不受影响。此操作无法撤销。</p>
       <div className="dialog-actions"><Button onClick={() => setPendingDelete(null)}>取消</Button>
         <Button variant="filled" onClick={() => { const target = pendingDelete; setPendingDelete(null); if (target) void editor.remove(target); }}>确认删除</Button></div>
     </MaterialDialog>
+    <MergeClipsDialog clips={pendingMerge} onClose={() => setPendingMerge(null)} onConfirm={() => {
+      if (!pendingMerge || pendingMerge.length < 2) return;
+      const ordered = [...pendingMerge].sort((a, b) => a.start_seconds - b.start_seconds);
+      const merged = mergeClips(ordered);
+      const ids = new Set(ordered.map(value => value.id));
+      editor.change([...editor.history.present.filter(value => !ids.has(value.id)), merged]);
+      editor.select(merged.id, false); setPendingMerge(null);
+    }} />
     <section className="timeline-dock">
       {editor.error && <div className="error" role="alert">{editor.error}</div>}
       {editor.waveError && <div className="error" role="alert">波形生成失败：{editor.waveError}</div>}
-      {editor.project && <SongTimeline duration={editor.project.duration} time={editor.time} clips={editor.history.present} selected={editor.selected} waveform={editor.waveform}
+      {editor.project && <SongTimeline key={editor.project.id} duration={editor.project.duration} time={editor.time} clips={editor.history.present} selected={editor.selected} waveform={editor.waveform}
         canUndo={editor.history.past.length > 0} canRedo={editor.history.future.length > 0}
+        marks={editor.marks} canSplit={editor.canSplit} onMarkIn={editor.markIn} onMarkOut={editor.markOut} onClearMarks={editor.clearMarks}
         onSeek={seek} onSelect={editor.select} onChange={editor.change}
-        onAdd={editor.add} onSplit={editor.split} onDelete={() => editor.change(editor.history.present.filter(c => !editor.selected.includes(c.id)))}
+        onLocate={value => { video.current?.pause(); if (video.current) video.current.currentTime = value; editor.locateBoundary(value); }}
+        onMerge={ids => setPendingMerge(editor.history.present.filter(value => ids.includes(value.id)))}
+        saving={!!editor.busy} onSave={() => void editor.run('正在保存…', async () => { await editor.save(); })}
+        onAdd={editor.add} onSplit={editor.split} onDelete={ids => { editor.change(editor.history.present.filter(c => !ids.includes(c.id))); editor.setSelected(current => current.filter(id => !ids.includes(id))); }}
         onUndo={() => editor.dispatch({ type: 'undo' })} onRedo={() => editor.dispatch({ type: 'redo' })} />}
-      <footer className="editor-status"><span role="status">{editor.busy || editor.notice || (dirty ? '有未保存修改' : editor.project ? '草稿已保存' : '')}</span>
-        <span className="status-hint">入点 <kbd>I</kbd> 出点 <kbd>O</kbd> 拆分 <kbd>S</kbd></span>
-        {editor.history.present.length > 0 && <span className="status-count">已选 <b>{editor.selected.length}</b> / {editor.history.present.length}</span>}
-        <Button variant="text" disabled={editor.selected.length < 2} title="取选中区间的外包范围，包含中间间隔" onClick={editor.merge}>合并（含间隔）</Button>
-        <Button variant="text" disabled={!editor.project || !!editor.busy} onClick={() => void editor.run('正在保存…', async () => { await editor.save(); })}>保存草稿</Button>
-      </footer>
     </section>
   </div>;
 }

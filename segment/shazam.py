@@ -15,7 +15,7 @@ CONNECT_TIMEOUT_SECONDS = 30
 
 
 class ShazamProxyClient(HTTPClient):
-    """把请求固定走显式代理：aiohttp 默认读取环境变量代理，显式传入会与之叠加。"""
+    """把请求固定走显式代理，不读取环境变量代理。"""
 
     def __init__(self, proxy):
         super().__init__(
@@ -28,28 +28,42 @@ class ShazamProxyClient(HTTPClient):
     def _ensure_client(self):
         loop = asyncio.get_running_loop()
         if self._retry_client is None or (self._loop is not loop and not self._closed):
-            session = ClientSession(trust_env=False, timeout=ClientTimeout(connect=CONNECT_TIMEOUT_SECONDS))
+            session = ClientSession(
+                trust_env=False,
+                timeout=ClientTimeout(connect=CONNECT_TIMEOUT_SECONDS),
+                trace_configs=[self.trace_config],
+            )
             self._retry_client = RetryClient(
                 client_session=session,
                 retry_options=self.retry_options,
                 raise_for_status=False,
-                trace_configs=[self.trace_config],
             )
             self._loop = loop
         return self._retry_client
 
     async def request(self, method, url, **kwargs):
-        return await super().request(method, url, proxy=self.proxy, **kwargs)
+        kwargs["proxy"] = self.proxy
+        return await super().request(method, url, **kwargs)
 
     async def request_text(self, url, *, content_type, **kwargs):
-        return await super().request_text(url, content_type=content_type, proxy=self.proxy, **kwargs)
+        kwargs["proxy"] = self.proxy
+        return await super().request_text(url, content_type=content_type, **kwargs)
+
+
+class ShazamWithProxy(Shazam):
+    def __init__(self, proxy):
+        self._proxy_client = ShazamProxyClient(proxy)
+        super().__init__(http_client=self._proxy_client)
+
+    async def close(self):
+        await self._proxy_client.close()
 
 
 def create_client(proxy):
     """代理为空时沿用 shazamio 默认客户端，保持原有直连行为。"""
     if proxy is None:
         return Shazam()
-    return Shazam(http_client=ShazamProxyClient(proxy))
+    return ShazamWithProxy(proxy)
 
 
 async def shazam_orig(file, proxy=None, **kwargs):

@@ -22,9 +22,14 @@ export function Button({ variant = 'tonal', className = '', ...props }: ButtonPr
   return <button ref={useBehavior<HTMLButtonElement>('button')} type='button' {...props}
     className={`${classNames(buttonClasses({ color: variant, size: 'sm' }))} ${className}`} />;
 }
-export function IconButton({ label, className = '', variant = 'text', ...props }: ButtonProps & { label: string }) {
+export function IconButton({ label, className = '', variant = 'text', onClick, ...props }: ButtonProps & { label: string }) {
   const color = variant === 'text' ? 'standard' : variant;
   return <button ref={useBehavior<HTMLButtonElement>('icon')} type='button' {...props} title={label} aria-label={label}
+    onClick={event => {
+      // React owns controlled toggle state; prevent Material's post-dispatch toggle.
+      if (props['aria-pressed'] !== undefined) event.preventDefault();
+      onClick?.(event);
+    }}
     className={`${classNames(iconButtonClasses({ color, size: 'sm' }))} ${className}`} />;
 }
 export function ListButton({ selected, className = '', ...props }: ButtonProps & { selected?: boolean }) {
