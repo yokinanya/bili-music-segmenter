@@ -2,9 +2,11 @@
 
 import array
 import json
+import re
 import subprocess
 import tempfile
 from pathlib import Path
+from threading import Lock
 
 from segment.music_agent.manifest import atomic_write_json
 
@@ -12,9 +14,33 @@ SAMPLE_RATE = 8000
 SAMPLES_PER_PEAK = 800
 PCM_MAX = 32768
 WAVEFORM_VERSION = 1
+_CACHE_NAME = re.compile(r"waveform-[0-9a-f]{64}-v[0-9]+\.json")
+_cache_lock = Lock()
+
+
+def _waveform_files(cache: Path) -> list[Path]:
+    return [path for path in cache.glob("waveform-*.json") if _CACHE_NAME.fullmatch(path.name) and path.is_file()]
+
+
+def waveform_cache_bytes(cache: Path) -> int:
+    with _cache_lock:
+        return sum(path.stat().st_size for path in _waveform_files(cache))
+
+
+def clear_waveforms(cache: Path) -> int:
+    with _cache_lock:
+        files = _waveform_files(cache)
+        for path in files:
+            path.unlink()
+        return len(files)
 
 
 def waveform(source: Path, cache: Path, digest: str) -> dict:
+    with _cache_lock:
+        return _waveform(source, cache, digest)
+
+
+def _waveform(source: Path, cache: Path, digest: str) -> dict:
     destination = cache / f"waveform-{digest}-v{WAVEFORM_VERSION}.json"
     if destination.is_file():
         return json.loads(destination.read_text(encoding="utf-8"))

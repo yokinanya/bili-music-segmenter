@@ -6,14 +6,15 @@ import { runInNewContext } from 'node:vm';
 import { matchesExport } from '../src/lib/exportSnapshot.ts';
 
 const { transformSync } = createRequire(import.meta.url)('next/dist/build/swc');
-function render(mode, job = null) {
+function render(mode, job = null, { editorApi = {}, apply = () => {}, onClose = () => {} } = {}) {
   let slot = 0;
   const source = readFileSync(new URL('../src/components/SongTasks.tsx', import.meta.url), 'utf8');
   const { code } = transformSync(source, { jsc: { parser: { syntax: 'typescript', tsx: true }, transform: { react: { runtime: 'automatic' } } }, module: { type: 'commonjs' } });
   const module = { exports: {} };
   const jsx = (type, props) => typeof type === 'function' ? type(props) : ({ type, props });
   runInNewContext(code, { exports: module.exports, module, require: name => {
-    if (name === 'react') return { useEffect: () => {}, useState: value => [slot++ === 1 ? job : value, () => {}] };
+    if (name === 'react') return { useEffect: () => {}, useEffectEvent: callback => callback,
+      useRef: current => ({ current }), useState: value => [slot++ === 1 ? job : value, () => {}] };
     if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'fragment' };
     if (name === './Material') return { MaterialDialog: props => props.open ? { type: 'dialog', props } : null,
       ActionLink: props => ({type:'a',props}), Button: props => ({ type: 'button', props }), Switch: props => ({ type: 'switch', props }), Progress: props => ({ type: 'progress', props }) };
@@ -21,11 +22,11 @@ function render(mode, job = null) {
     if (name === './Parameters') return { Parameters: () => null };
     if (name === './AnalysisProgress') return { AnalysisProgress: props => ({type:'progress',props}) };
     if (name === '@/lib/api') return { api: {} };
-    if (name === '@/lib/editorApi') return { editorApi: {}, exportUrl: () => '' };
+    if (name === '@/lib/editorApi') return { editorApi, exportUrl: () => '' };
     if (name === '@/lib/format') return { errorText: String };
     throw new Error(name);
   } });
-  return module.exports.SongTasks({ mode, project: { id: 'p', revision: 1, clips: [] }, selected: [], save: async () => {}, apply: () => {}, onClose: () => {} });
+  return module.exports.SongTasks({ mode, project: { id: 'p', revision: 1, clips: [] }, selected: [], save: async () => {}, apply, onClose });
 }
 function text(node) {
   if (!node || typeof node === 'boolean') return '';
@@ -35,11 +36,11 @@ function text(node) {
 test('AI dialog exposes analysis only and export dialog exposes exports only', () => {
   const ai = text(render('analysis'));
   assert.ok(ai.includes('开始分析'));
-  assert.equal(ai.includes('导出选中区间'), false);
+  assert.equal(ai.includes('开始导出'), false);
   const exporting = text(render('export'));
-  assert.ok(exporting.includes('导出选中区间'));
+  assert.ok(exporting.includes('开始导出'));
   assert.equal(exporting.includes('开始分析'), false);
-  assert.equal(text(render(null)), '');
+  assert.equal(text(render(null)).trim(), '');
 });
 test('running analysis has one stop action and an indeterminate progress indicator', () => {
   const tree = render('analysis', { id: 'j', state: 'running', batch: [], stop_requested: false });
@@ -51,4 +52,33 @@ test('failed analysis exposes nested recognizer errors rather than claiming comp
   const tree = render('analysis', { id: 'j', state: 'failed', error: null, batch: [{ error: '执行进程退出：1', steps: [{state:'failed', label:'shazam 识曲', error:'TimeoutError'}] }] });
   assert.ok(text(tree).includes('TimeoutError'));
   assert.ok(text(tree).includes('部分结果'));
+});
+
+function find(node, predicate) {
+  if (!node || typeof node !== 'object') return undefined;
+  if (predicate(node)) return node;
+  for (const child of [node.props?.children].flat(Infinity)) {
+    const match = find(child, predicate);
+    if (match) return match;
+  }
+}
+
+test('completed analysis adds candidates from the footer in one click', async () => {
+  const clips = [{ id: 'candidate', name: '歌曲', start_seconds: 10, end_seconds: 20 }];
+  const events = [];
+  const tree = render('analysis', { id: 'j', state: 'succeeded', batch: [] }, {
+    editorApi: { candidates: async (project, job) => {
+      assert.deepEqual([project, job], ['p', 'j']);
+      return { clips, state: 'succeeded', error: null };
+    } },
+    apply: result => events.push(result),
+    onClose: () => events.push('closed'),
+  });
+  const footer = find(tree, node => node.props?.className === 'dialog-actions');
+  const primary = find(footer, node => node.type === 'button' && node.props.variant === 'filled');
+  assert.equal(text(primary), '添加到时间轴');
+  assert.equal(text(tree).includes('查看 AI 候选'), false);
+  assert.deepEqual(events, []);
+  await primary.props.onClick();
+  assert.deepEqual(events, [clips, 'closed']);
 });

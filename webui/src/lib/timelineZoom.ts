@@ -3,6 +3,14 @@ export const ZOOM_STEPS = [1, 2, 4, 8, 16, 32];
 interface ZoomPosition { zoom: number; scrollLeft: number }
 interface Options { element: HTMLElement; zoom: number; onZoom: (position: ZoomPosition) => void }
 
+export function bindPageZoomPrevention(target: Document) {
+  const wheel = (event: WheelEvent) => {
+    if (event.ctrlKey) event.preventDefault();
+  };
+  target.addEventListener('wheel', wheel, { capture: true, passive: false });
+  return () => target.removeEventListener('wheel', wheel, { capture: true });
+}
+
 export function bindTimelineZoom({ element, zoom, onZoom }: Options) {
   let pending: ZoomPosition | null = null;
   const wheel = (event: WheelEvent) => {

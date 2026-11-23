@@ -15,21 +15,36 @@ function loadLayout() {
   return module.exports;
 }
 
-function timeline() {
-  const element = Object.assign(new EventTarget(), { scrollLeft: 200, getBoundingClientRect: () => ({ left: 100, width: 800 }) });
-  const positions = [];
+function loadZoom() {
   const module = { exports: {} };
   const source = readFileSync(new URL('../src/lib/timelineZoom.ts', import.meta.url), 'utf8');
   const { code } = transformSync(source, { jsc: { parser: { syntax: 'typescript' } }, module: { type: 'commonjs' } });
   runInNewContext(code, { exports: module.exports, module });
-  const dispose = module.exports.bindTimelineZoom({ element, zoom: 2, onZoom: value => positions.push(value) });
-  const wheel = (properties = {}) => {
-    const event = Object.assign(new Event('wheel', { cancelable: true }), { deltaY: -100, clientX: 500, ctrlKey: false, metaKey: false, ...properties });
-    element.dispatchEvent(event);
-    return event;
-  };
-  return { wheel, positions, dispose };
+  return module.exports;
 }
+
+function dispatchWheel(target, properties = {}) {
+  const event = Object.assign(new Event('wheel', { cancelable: true }), { deltaY: -100, clientX: 500, ctrlKey: false, metaKey: false, ...properties });
+  target.dispatchEvent(event);
+  return event;
+}
+
+function timeline() {
+  const element = Object.assign(new EventTarget(), { scrollLeft: 200, getBoundingClientRect: () => ({ left: 100, width: 800 }) });
+  const positions = [];
+  const dispose = loadZoom().bindTimelineZoom({ element, zoom: 2, onZoom: value => positions.push(value) });
+  return { wheel: properties => dispatchWheel(element, properties), positions, dispose };
+}
+
+test('Ctrl wheel outside the timeline cancels page zoom but leaves plain scrolling alone', () => {
+  const page = new EventTarget();
+  const dispose = loadZoom().bindPageZoomPrevention(page);
+  assert.equal(dispatchWheel(page, { ctrlKey: true }).defaultPrevented, true);
+  assert.equal(dispatchWheel(page, { metaKey: true }).defaultPrevented, false);
+  assert.equal(dispatchWheel(page).defaultPrevented, false);
+  dispose();
+  assert.equal(dispatchWheel(page, { ctrlKey: true }).defaultPrevented, false);
+});
 
 test('Ctrl wheel zooms around the pointer and prevents browser zoom', () => {
   const { wheel, positions } = timeline();
@@ -50,6 +65,15 @@ test('minimum zoom fits the timeline viewport with no horizontal overflow', () =
   assert.equal(positions.at(-1).zoom, 1);
   assert.equal(positions.at(-1).scrollLeft, 0);
   assert.equal(loadLayout().timelineWidth(800, positions.at(-1).zoom), 800);
+});
+
+test('jumping to a song reveals its start without changing an already visible view', () => {
+  const { revealTimelinePosition } = loadLayout();
+  const viewport = { width: 800, scrollLeft: 200, scrollWidth: 3200 };
+  assert.equal(revealTimelinePosition(1600, viewport), 1200);
+  assert.equal(revealTimelinePosition(600, viewport), 200);
+  assert.equal(revealTimelinePosition(50, viewport), 0);
+  assert.equal(revealTimelinePosition(3190, viewport), 2400);
 });
 
 test('Meta wheel zooms out and cleanup removes interception', () => {

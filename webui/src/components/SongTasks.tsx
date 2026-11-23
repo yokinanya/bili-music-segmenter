@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { editorApi, exportUrl, type ExportTask } from '@/lib/editorApi';
 import type { EditorProject, SongClip } from '@/lib/editor';
@@ -18,7 +18,7 @@ interface Props {
 
 export function SongTasks({ project, selected, save, apply, mode, onClose, onOpenExport }: Props) {
   const [options, setOptions] = useState<RunOptions | null>(null), [job, setJob] = useState<JobStatus | null>(null);
-  const [task, setTask] = useState<ExportTask | null>(null), [candidates, setCandidates] = useState<SongClip[] | null>(null);
+  const [task, setTask] = useState<ExportTask | null>(null), [noCandidates, setNoCandidates] = useState(false);
   const [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const [reuseCache, setReuseCache] = useState(true);
   const [applied, setApplied] = useState(false);
@@ -27,23 +27,25 @@ export function SongTasks({ project, selected, save, apply, mode, onClose, onOpe
   const restored = useRef(false);
   const selection = project.clips.filter(clip => selected.includes(clip.id));
   const selectionKey = JSON.stringify(selection);
+  const restoreExports = useEffectEvent((tasks: ExportTask[]) => {
+    const matching = tasks.filter(value => matchesExport(value, selection, filenameSuffix));
+    const running = tasks.find(value => ['queued', 'running'].includes(value.state));
+    const latest = running ?? matching.at(-1) ?? tasks.at(-1) ?? null;
+    setTask(current => running ?? tasks.find(value => value.id === current?.id) ?? latest);
+    if (!restored.current) {
+      restored.current = true;
+      if (latest) setFilenameSuffix(latest.filename_suffix ?? '');
+    }
+  });
   useEffect(() => {
     let active = true;
     setLoadingExports(true);
     void editorApi.exports(project.id).then(({ tasks }) => {
-      if (!active) return;
-      const matching = tasks.filter(value => matchesExport(value, selection, filenameSuffix));
-      const running = tasks.find(value => ['queued', 'running'].includes(value.state));
-      const latest = running ?? matching.at(-1) ?? tasks.at(-1) ?? null;
-      setTask(current => running ?? tasks.find(value => value.id === current?.id) ?? latest);
-      if (!restored.current) {
-        restored.current = true;
-        if (latest) setFilenameSuffix(latest.filename_suffix ?? '');
-      }
+      if (active) restoreExports(tasks);
     }).catch(cause => { if (active) setError(errorText(cause)); })
       .finally(() => { if (active) setLoadingExports(false); });
     return () => { active = false; };
-  }, [mode, project.id, selectionKey, filenameSuffix]);
+  }, [mode, project.id, selectionKey]);
   useEffect(() => { if (mode === 'analysis') void api.bootstrap().then(data => setOptions(data.defaults)).catch(cause => setError(errorText(cause))); }, [mode]);
   useEffect(() => {
     if (!job || !['queued', 'running'].includes(job.state)) return;
@@ -63,10 +65,18 @@ export function SongTasks({ project, selected, save, apply, mode, onClose, onOpe
     if (!options) throw new Error('分析参数尚未加载');
     await save();
     const result = await editorApi.analyze(project.id, options, !reuseCache);
-    setJob(await api.job(result.id)); setCandidates(null); setApplied(false);
+    setJob(await api.job(result.id)); setNoCandidates(false); setApplied(false);
+  });
+  const addToTimeline = (jobId: string) => run(async () => {
+    const { clips } = await editorApi.candidates(project.id, jobId);
+    if (!clips.length) { setNoCandidates(true); return; }
+    apply(clips);
+    setApplied(true);
+    onClose();
   });
   const exporting = !!task && ['queued', 'running'].includes(task.state);
   const analyzing = !!job && ['queued', 'running'].includes(job.state);
+  const canAdd = !!job && !analyzing && !applied && !noCandidates;
   const completedSelection = !!task && task.state === 'succeeded' && matchesExport(task, selection, filenameSuffix);
   const running = job?.batch.flatMap(item => item.steps).filter(step => step.state === 'running').map(step => step.label) ?? [];
   const issues = [...new Set([job?.error, ...job?.batch.flatMap(item => [item.error, ...item.steps.filter(step => step.error).map(step => `${step.label}：${step.error}`)]) ?? []].filter(Boolean))];
@@ -93,18 +103,17 @@ export function SongTasks({ project, selected, save, apply, mode, onClose, onOpe
         <Switch label="复用识别缓存" checked={reuseCache} disabled={busy || analyzing} onChange={setReuseCache} />
         <small className="drawer-hint">相同音频和参数复用已有结果；取消勾选可重新识别。</small>
         {analyzing && mode === 'analysis' && <AnalysisProgress job={job!} />}
-        {job && !analyzing && <div className="analysis-result-actions">
-          {!applied && <Button variant="outlined" disabled={busy} onClick={() => void run(async () => { setCandidates((await editorApi.candidates(project.id, job.id)).clips); })}>查看 AI 候选</Button>}
-          {['failed', 'interrupted', 'cancelled'].includes(job.state) && <Button variant="outlined" disabled={busy} onClick={() => void run(async () => { await api.retry(job.id); setJob(await api.job(job.id)); })}>续跑分析</Button>}
-        </div>}
-        {candidates !== null && (candidates.length
-          ? <div className="drawer-hint">{job?.state !== 'succeeded' ? '部分结果：' : ''}找到 {candidates.length} 个区间，添加不会覆盖手动片段。<Button onClick={() => { apply(candidates); setCandidates(null); setApplied(true); onClose(); }}>添加候选到时间轴</Button></div>
-          : <p className="drawer-hint">本次没有可用的歌曲候选，仍可手动标记区间。</p>)}
+        {job && ['failed', 'interrupted', 'cancelled'].includes(job.state) && <Button variant="outlined" disabled={busy} onClick={() => void run(async () => {
+          await api.retry(job.id);
+          setJob(await api.job(job.id));
+          setNoCandidates(false);
+        })}>续跑分析</Button>}
+        {noCandidates && <p className="drawer-hint" role="status">本次没有可用的歌曲候选，仍可手动标记区间。</p>}
         {applied && <p role="status">候选已添加到时间轴</p>}
       </section>}
       {mode === 'export' && <section className="drawer-group">
         <h3>已选 {selected.length} 个歌曲区间</h3>
-        <TextField label="文件名后缀（可选）" value={filenameSuffix} disabled={busy || exporting} onChange={setFilenameSuffix} />
+        <TextField label="文件名后缀（可选）" value={filenameSuffix} disabled={busy || exporting} onChange={value => { restored.current = true; setFilenameSuffix(value); }} />
         <small className="drawer-hint">添加到扩展名前，仅用于本次导出；留空保留原文件名。</small>
         <details className="export-file-details" key={mode + project.id}>
           <summary>查看文件列表 · {selection.length} 首</summary>
@@ -146,7 +155,10 @@ export function SongTasks({ project, selected, save, apply, mode, onClose, onOpe
         {mode === 'analysis' && <Button variant="outlined" disabled={busy || (analyzing && job?.stop_requested) || (!analyzing && !options)} onClick={() => {
           if (analyzing) void run(async () => { await api.stop(job!.id); setJob(await api.job(job!.id)); });
           else void analyze();
-        }}>{busy ? '正在提交…' : analyzing ? job?.stop_requested ? '正在停止…' : '停止分析' : job ? '重新分析' : '开始分析'}</Button>}
+        }}>{busy && !canAdd ? '正在提交…' : analyzing ? job?.stop_requested ? '正在停止…' : '停止分析' : job ? '重新分析' : '开始分析'}</Button>}
+        {mode === 'analysis' && canAdd && <Button variant="filled" disabled={busy} onClick={() => addToTimeline(job.id)}>
+          {job.state === 'succeeded' ? '添加到时间轴' : '添加部分结果'}
+        </Button>}
       </div>
     </div>
   </MaterialDialog></>;

@@ -65,6 +65,17 @@ class DocumentStore:
         with self.connect() as connection:
             connection.execute("DELETE FROM documents WHERE collection=? AND id=?", (collection, identity))
 
+    def collection_bytes(self, collection: str) -> int:
+        with self.connect() as connection:
+            return connection.execute(
+                "SELECT COALESCE(SUM(length(CAST(body AS BLOB))), 0) FROM documents WHERE collection=?",
+                (collection,),
+            ).fetchone()[0]
+
+    def clear_collection(self, collection: str) -> int:
+        with self.connect() as connection:
+            return connection.execute("DELETE FROM documents WHERE collection=?", (collection,)).rowcount
+
     @staticmethod
     def _put(connection: sqlite3.Connection, collection: str, document: dict[str, Any]) -> None:
         connection.execute(

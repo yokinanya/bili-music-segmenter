@@ -7,13 +7,14 @@ import { mediaTime as clock } from '@/lib/format';
 import { usePointerSeek } from '@/lib/usePointerSeek';
 import { useTimelineTrim } from '@/lib/useTimelineTrim';
 import { bindTimelineZoom, ZOOM_STEPS } from '@/lib/timelineZoom';
-import { timelineTickTranslation, timelineWidth } from '@/lib/timelineLayout';
+import { revealTimelinePosition, timelineTickTranslation, timelineWidth } from '@/lib/timelineLayout';
 import { TimelineToolbar } from './TimelineToolbar';
 import { Button, Slider } from './Material';
 import { ClipContextMenu, type ClipMenuPosition } from './ClipContextMenu';
 
 interface Props {
   duration: number; time: number; clips: SongClip[]; selected: string[]; waveform: Waveform | null;
+  listJump: { time: number } | null;
   canUndo: boolean; canRedo: boolean;
   canSplit: boolean; marks: { start: number | null; end: number | null };
   onMarkIn: () => void; onMarkOut: () => void; onClearMarks: () => void;
@@ -44,6 +45,16 @@ export function SongTimeline(props: Props) {
     } });
   }, [zoom]);
   const scale = width / Math.max(1, props.duration) * zoom;
+  const lastListJump = useRef<Props['listJump']>(null);
+  useLayoutEffect(() => {
+    const element = viewport.current;
+    const jump = props.listJump;
+    if (!element || !jump || jump === lastListJump.current) return;
+    lastListJump.current = jump;
+    element.scrollLeft = revealTimelinePosition(jump.time * scale, {
+      width: element.clientWidth, scrollLeft: element.scrollLeft, scrollWidth: element.scrollWidth,
+    });
+  }, [props.listJump, scale]);
   const changeZoom = (next: number) => {
     setZoom(next);
     requestAnimationFrame(() => {
@@ -95,7 +106,7 @@ export function SongTimeline(props: Props) {
     snapping, position, viewport, onChange: props.onChange });
   const boundary = trim.preview?.clip[trim.preview.edge];
   const selectedClip = props.clips.find(clip => clip.id === props.selected[0]);
-  return <><section className={`song-timeline ${selectedClip ? 'has-boundary-tools' : ''}`} aria-label="原视频时间轴">
+  return <><section className="song-timeline" aria-label="原视频时间轴">
     <TimelineToolbar {...props} hasSelection={props.selected.length > 0} snapping={snapping}
       clip={selectedClip} onClipChange={value => props.onChange(props.clips.map(clip => clip.id === value.id ? value : clip))}
       onSnap={() => setSnapping(value => !value)} onFit={fit} />

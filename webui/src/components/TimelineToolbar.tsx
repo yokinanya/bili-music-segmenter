@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { mediaTime } from '@/lib/format';
-import { Field, IconButton } from './Material';
+import { IconButton } from './Material';
 import { Icon } from './Icon';
 import type { SongClip } from '@/lib/editor';
 import { BoundaryNudge } from './BoundaryNudge';
@@ -16,20 +16,16 @@ interface Props {
 export function TimelineToolbar(props: Props) {
   const [boundaryOpen, setBoundaryOpen] = useState(true);
   const [panel, setPanel] = useState<'edit' | 'boundary'>('edit');
+  const { clip } = props;
+  const activePanel = clip ? panel : 'edit';
   const valid = props.marks.start !== null && props.marks.end !== null && props.marks.start < props.marks.end;
-  return <div className={`timeline-floating-tools ${boundaryOpen ? 'boundary-open' : ''}`} data-panel={panel}>
+  return <header className="timeline-topbar" data-panel={activePanel}>
     <div className="timeline-panel-switch" role="group" aria-label="时间轴工具面板">
-      <button type="button" aria-pressed={panel === 'edit'} onClick={() => setPanel('edit')}>编辑</button>
-      <button type="button" aria-pressed={panel === 'boundary'} disabled={!props.clip} onClick={() => { setBoundaryOpen(true); setPanel('boundary'); }}>切点</button>
+      <button type="button" aria-pressed={activePanel === 'edit'} onClick={() => setPanel('edit')}>编辑</button>
+      <button type="button" aria-pressed={activePanel === 'boundary'} disabled={!clip} onClick={() => { setBoundaryOpen(true); setPanel('boundary'); }}>切点</button>
     </div>
-    {props.clip && <section className="timeline-boundary-tools" aria-label="选中片段切点调整" inert={!boundaryOpen}>
-      <div className="timeline-boundary-fields" key={props.clip.id}>
-        <Field label="入点 / 秒" min="0" max={String(props.clip.end_seconds - .001)} step="0.001" value={props.clip.start_seconds}
-          onChange={value => props.clip && props.onClipChange({ ...props.clip, start_seconds: value })} />
-        <Field label="出点 / 秒" min={String(props.clip.start_seconds + .001)} max={String(props.duration)} step="0.001" value={props.clip.end_seconds}
-          onChange={value => props.clip && props.onClipChange({ ...props.clip, end_seconds: value })} />
-      </div>
-      <BoundaryNudge key={props.clip.id} clip={props.clip} duration={props.duration} onChange={props.onClipChange} onLocate={props.onLocate} />
+    {clip && <section key={clip.id} className="timeline-boundary-tools" aria-label="选中片段切点调整" hidden={!boundaryOpen}>
+      <BoundaryNudge clip={clip} duration={props.duration} onChange={props.onClipChange} onLocate={props.onLocate} />
     </section>}
     <div className="timeline-toolbar" role="toolbar" aria-label="时间轴编辑工具">
     <IconButton className="timeline-boundary-toggle" aria-pressed={boundaryOpen} aria-expanded={boundaryOpen} disabled={!props.clip}
@@ -56,5 +52,5 @@ export function TimelineToolbar(props: Props) {
       {props.marks.start === null ? '未设入点' : mediaTime(props.marks.start)} — {props.marks.end === null ? '未设出点' : mediaTime(props.marks.end)}
       {!valid && props.marks.start !== null && props.marks.end !== null && ' · 出点须晚于入点'}
     </span>}
-  </div></div>;
+  </div></header>;
 }

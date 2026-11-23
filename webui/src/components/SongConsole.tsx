@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useSongEditor } from '@/lib/useSongEditor';
+import { assetDropHandlers } from '@/lib/assetDrop';
 import { mergeClips, type EditorProject, type SongClip } from '@/lib/editor';
 import { sourceUrl } from '@/lib/editorApi';
 import { previewType } from '@/lib/previewMedia';
@@ -19,9 +20,12 @@ import './song-console.css';
 
 export function SongConsole({ toolbarTarget }: { toolbarTarget: HTMLElement | null }) {
   const editor = useSongEditor(), video = useRef<HTMLVideoElement>(null), [taskMode, setTaskMode] = useState<TaskDialogMode>(null);
+  const [listJump, setListJump] = useState<{ projectId: string; time: number } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<EditorProject | null>(null);
   const [pendingMerge, setPendingMerge] = useState<SongClip[] | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
+  const [draggingAssets, setDraggingAssets] = useState(false);
+  const drop = assetDropHandlers({ busy: !!editor.busy, importFiles: editor.importFiles, highlight: setDraggingAssets });
   const registerVideo = useCallback((element: HTMLVideoElement | null) => { video.current = element; }, []);
   const clip = editor.history.present.find(value => value.id === editor.selected[0]);
   const seek = (value: number) => { if (video.current) video.current.currentTime = value; editor.seekTime(value); };
@@ -38,7 +42,7 @@ export function SongConsole({ toolbarTarget }: { toolbarTarget: HTMLElement | nu
         event.preventDefault(); event.stopImmediatePropagation();
         if (event.type === 'keydown' && !event.repeat) {
           const focused = document.activeElement;
-          if (focused instanceof HTMLElement && focused.closest('.timeline-floating-tools')
+          if (focused instanceof HTMLElement && focused.closest('.timeline-topbar')
             && focused.matches('button, [role="button"]')) focused.blur();
           toggle();
         }
@@ -75,7 +79,7 @@ export function SongConsole({ toolbarTarget }: { toolbarTarget: HTMLElement | nu
     </>, toolbarTarget)}
     <div className="console-shell">
     <div className="console-body">
-      <aside className="asset-panel" aria-label="素材库">
+      <aside className={`asset-panel${draggingAssets ? ' asset-dragging' : ''}`} aria-label="素材库" {...drop}>
         <header><h2>素材</h2><Button variant="text" onClick={() => importRef.current?.click()} disabled={!!editor.busy}>导入录像</Button><input ref={importRef} type="file" multiple accept="video/*,audio/*,.mkv,.flv,.ts" hidden onChange={event => { void editor.importFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = ''; }} /></header>
         <div className="asset-scroll">
           {editor.importProgress && <div className="operation-progress import-progress" role="status">
@@ -86,7 +90,7 @@ export function SongConsole({ toolbarTarget }: { toolbarTarget: HTMLElement | nu
               : editor.importProgress.sent >= editor.importProgress.size ? '文件已发送，等待服务端写入与校验完成…'
               : `${(editor.importProgress.sent / 1024 ** 2).toFixed(1)} / ${(editor.importProgress.size / 1024 ** 2).toFixed(1)} MiB · ${(editor.importProgress.sent / editor.importProgress.size * 100).toFixed(1)}%`}</small>
           </div>}
-          {!editor.project && <label className="asset-drop empty">{importInput()}<strong>点击导入录像</strong><span>MP4 / MKV / FLV / TS</span></label>}
+          {!editor.project && <label className="asset-drop empty">{importInput()}<strong>拖入文件或点击导入</strong><span>MP4 / MKV / FLV / TS</span></label>}
           {editor.projects.map(project => <div key={project.id} className="asset-row">
             <button className="asset-item" aria-pressed={project.id === editor.project?.id} onClick={() => editor.open(project)}>
               <span className="asset-thumb"><span /></span><span className="asset-copy"><strong>{project.name}</strong><small>{clock(project.duration)} · {project.clips.length} 首候选</small></span>
@@ -94,7 +98,16 @@ export function SongConsole({ toolbarTarget }: { toolbarTarget: HTMLElement | nu
             <button className="asset-remove" aria-label={`删除素材 ${project.name}`} disabled={!!editor.busy} onClick={() => setPendingDelete(project)}><Icon name="trash" size="sm" /></button>
           </div>)}
           {editor.project && <section className="asset-clips"><h3>歌曲区间 <span>{editor.history.present.length}</span></h3>
-            {editor.history.present.map((value, index) => <button key={value.id} aria-pressed={editor.selected.includes(value.id)} onClick={e => { if (e.shiftKey) { editor.selectRange(value.id); return; } editor.select(value.id, e.ctrlKey || e.metaKey); if (!e.ctrlKey && !e.metaKey) { if (video.current) video.current.currentTime = value.start_seconds; editor.setTime(value.start_seconds); } }}>
+            {editor.history.present.map((value, index) => <button key={value.id} aria-pressed={editor.selected.includes(value.id)} onClick={event => {
+              if (event.shiftKey) { editor.selectRange(value.id); return; }
+              const multi = event.ctrlKey || event.metaKey;
+              editor.select(value.id, multi);
+              if (multi) return;
+              const time = value.start_seconds;
+              if (video.current) video.current.currentTime = time;
+              editor.setTime(time);
+              if (editor.project) setListJump({ projectId: editor.project.id, time });
+            }}>
               <span className="clip-index">{String(index + 1).padStart(2, '0')}</span><span><strong>{value.title || '待命名歌曲'}</strong><small>{clock(value.start_seconds)} — {clock(value.end_seconds)}</small></span>
             </button>)}</section>}
         </div>
@@ -126,6 +139,7 @@ export function SongConsole({ toolbarTarget }: { toolbarTarget: HTMLElement | nu
       {editor.error && <div className="error" role="alert">{editor.error}</div>}
       {editor.waveError && <div className="error" role="alert">波形生成失败：{editor.waveError}</div>}
       {editor.project && <SongTimeline key={editor.project.id} duration={editor.project.duration} time={editor.time} clips={editor.history.present} selected={editor.selected} waveform={editor.waveform}
+        listJump={listJump?.projectId === editor.project.id ? listJump : null}
         canUndo={editor.history.past.length > 0} canRedo={editor.history.future.length > 0}
         marks={editor.marks} canSplit={editor.canSplit} onMarkIn={editor.markIn} onMarkOut={editor.markOut} onClearMarks={editor.clearMarks}
         onSeek={seek} onSelect={editor.select} onChange={editor.change}

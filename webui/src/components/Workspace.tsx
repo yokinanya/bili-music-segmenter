@@ -1,5 +1,6 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { bindPageZoomPrevention } from '@/lib/timelineZoom';
 import { useWorkspace } from '@/lib/useWorkspace';
 import { Button, useMaterial } from './Material';
 import { Icon, type IconName } from './Icon';
@@ -9,6 +10,7 @@ import { ClearHistoryButton } from './HistoryPanel';
 import { UsagePage } from './UsagePage';
 import { SongConsole } from './SongConsole';
 import { TaskSettings } from './TaskSettings';
+import { CacheSettings } from './CacheSettings';
 import './editor-shell.css';
 
 const PAGES: Record<string, { title: string; rail: string; icon: IconName }> = {
@@ -22,6 +24,7 @@ const PAGES: Record<string, { title: string; rail: string; icon: IconName }> = {
 export function Workspace() {
   const state = useWorkspace(), material = useMaterial();
   const [editorActions, setEditorActions] = useState<HTMLSpanElement | null>(null);
+  useEffect(() => bindPageZoomPrevention(document), []);
   if (material !== 'ready') return <main className="loading" role="status">{material || '正在准备歌切工作台…'}</main>;
   const page = PAGES[state.page] ? state.page : '工作台';
   return <div className="app-shell editor-shell">
@@ -43,7 +46,11 @@ export function Workspace() {
         <div className="editor-view editor-flow" hidden={page !== '链接下载'}><Workbench state={state}  /></div>
 
         <div className="editor-view editor-flow" hidden={page !== '用量'}><UsagePage /></div>
-        <div className="editor-view editor-flow" hidden={page !== '设置'}><TaskSettings options={state.options} onSaved={state.setOptions} /><section className="settings-card"><h2>任务记录</h2><p className="helper">清除后只删除任务记录，已导出的视频和导入的素材保留在磁盘。</p><ClearHistoryButton /></section></div>
+        <div className="editor-view editor-flow" hidden={page !== '设置'}>
+          <TaskSettings options={state.options} onSaved={state.setOptions} />
+          <CacheSettings />
+          <section className="settings-card"><h2>任务记录</h2><p className="helper">清除后只删除任务记录，已导出的视频和导入的素材保留在磁盘。</p><ClearHistoryButton /></section>
+        </div>
         {state.current.notice && <div role="status" className="snackbar">{state.current.notice}<button aria-label="关闭通知" onClick={state.current.dismiss}><Icon name="close" size="sm" /></button></div>}
       </main>
     </div>

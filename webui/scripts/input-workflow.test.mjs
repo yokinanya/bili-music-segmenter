@@ -2,6 +2,39 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { reselectDraft } from '../src/lib/reselectDraft.ts';
 import { validateParameters } from '../src/lib/parameterValidation.ts';
+import { assetDropHandlers } from '../src/lib/assetDrop.ts';
+
+function drag(types, files = []) {
+  return {
+    defaultPrevented: false,
+    preventDefault() { this.defaultPrevented = true; },
+    dataTransfer: { types, files, dropEffect: 'none' },
+  };
+}
+
+test('dropping multiple files imports them together and clears drag feedback', () => {
+  const files = [new File(['a'], 'one.mp4'), new File(['b'], 'two.flv')];
+  const batches = [], feedback = [];
+  const handlers = assetDropHandlers({ busy: false, importFiles: batch => batches.push(batch), highlight: value => feedback.push(value) });
+  const over = drag(['Files']);
+  handlers.onDragOver(over);
+  const drop = drag(['Files'], files);
+  handlers.onDrop(drop);
+  assert.equal(over.dataTransfer.dropEffect, 'copy');
+  assert.equal(drop.defaultPrevented, true);
+  assert.deepEqual(batches, [files]);
+  assert.deepEqual(feedback, [true, false]);
+});
+
+test('busy imports suppress browser navigation without starting another batch', () => {
+  const handlers = assetDropHandlers({ busy: true, importFiles: () => assert.fail('unexpected upload'), highlight: value => assert.equal(value, false) });
+  const fileDrop = drag(['Files'], [new File(['a'], 'one.mp4')]);
+  const textDrop = drag(['text/plain']);
+  handlers.onDrop(fileDrop);
+  handlers.onDrop(textDrop);
+  assert.equal(fileDrop.defaultPrevented, true);
+  assert.equal(textDrop.defaultPrevented, false);
+});
 
 test('reselect keeps the original draft identity and source', () => {
   const source = { id: 'source', name: 'song.mp4', size_bytes: 4, state: 'failed', sha256: '', error: null };

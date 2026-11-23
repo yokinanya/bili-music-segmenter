@@ -58,6 +58,84 @@ def test_static_bootstrap_and_auth(server):
     assert b"def " not in request(server, "GET", "/../../segment/webui.py")[1]
 
 
+def test_cache_preview_counts_only_clearable_bytes(server, jobs):
+    cached = {"id": "sample", "value": "歌曲"}
+    jobs.store.put("recognition_results", cached)
+    jobs.store.put("projects", {"id": "draft"})
+    cache = jobs.root / "editor-cache"
+    cache.mkdir(exist_ok=True)
+    waveform = cache / f"waveform-{'a' * 64}-v1.json"
+    waveform.write_bytes(b"{}")
+    (cache / "waveform-unrelated.json").write_bytes(b"keep")
+
+    status, body, _ = request(server, "GET", "/api/settings/cache")
+
+    assert status == 200
+    assert json.loads(body) == {"bytes": {"recognition": 35, "waveform": 2, "audio": 0}}
+    assert jobs.store.get("recognition_results", "sample") == cached
+    assert waveform.read_bytes() == b"{}"
+
+
+@pytest.mark.parametrize("category", ["recognition", "waveform"])
+def test_clear_cache_only_removes_selected_category(server, jobs, category):
+    jobs.store.put("recognition_results", {"id": "sample", "value": "cached"})
+    project = {"id": "draft", "clips": []}
+    jobs.store.put("projects", project)
+    cache = jobs.root / "editor-cache"
+    cache.mkdir(exist_ok=True)
+    waveform = cache / f"waveform-{'a' * 64}-v1.json"
+    waveform.write_text("{}", encoding="utf-8")
+    unrelated = cache / "keep.mp4"
+    unrelated.write_bytes(b"keep")
+
+    status, body, _ = request(server, "POST", "/api/settings/cache/clear", data={"categories": [category]})
+
+    assert status == 200
+    assert json.loads(body) == {"removed": {category: 1}}
+    assert bool(jobs.store.list("recognition_results")) == (category != "recognition")
+    assert waveform.exists() == (category != "waveform")
+    assert jobs.store.get("projects", "draft") == project
+    assert unrelated.read_bytes() == b"keep"
+
+
+@pytest.mark.parametrize("categories", [[], ["recognition", "projects"], [{}], "waveform"])
+def test_clear_cache_rejects_invalid_selection_without_deleting(server, jobs, categories):
+    jobs.store.put("recognition_results", {"id": "sample", "value": "cached"})
+    status, _, _ = request(server, "POST", "/api/settings/cache/clear", data={"categories": categories})
+    assert status == 400
+    assert jobs.store.get("recognition_results", "sample")["value"] == "cached"
+
+
+def test_audio_cache_preview_and_clear_preserve_unmanaged_files(server, jobs):
+    audio = jobs.root / "audio"
+    audio.mkdir()
+    identity = "a" * 64
+    cached = audio / f"{identity}.mp3"
+    partial = audio / f"{identity}.part.mp3"
+    unmanaged = audio / "keep.mp3"
+    for path in (cached, partial, unmanaged):
+        path.write_bytes(b"1234")
+    jobs.store.put("local_cache", {"id": identity, "path": str(cached), "owners": ["job"]})
+    jobs.store.put("local_cache", {"id": "b" * 64, "path": str(unmanaged), "owners": ["job"]})
+
+    status, body, _ = request(server, "GET", "/api/settings/cache")
+    assert status == 200 and json.loads(body)["bytes"]["audio"] == 8
+    status, body, _ = request(server, "POST", "/api/settings/cache/clear", data={"categories": ["audio"]})
+    assert status == 200 and json.loads(body)["removed"] == {"audio": 2}
+    assert not cached.exists() and not partial.exists()
+    assert unmanaged.read_bytes() == b"1234"
+    assert [item["id"] for item in jobs.store.list("local_cache")] == ["b" * 64]
+
+
+def test_audio_cache_cannot_be_cleared_while_jobs_are_queued(server, jobs):
+    jobs.store.put("jobs", {"id": "active", "state": "queued"})
+    jobs.store.put("recognition_results", {"id": "keep"})
+    status, _, _ = request(server, "POST", "/api/settings/cache/clear", data={"categories": ["audio", "recognition"]})
+    assert status == 400
+    assert jobs.store.get("recognition_results", "keep") == {"id": "keep"}
+    jobs.store.delete("jobs", "active")
+
+
 def test_browser_upload_and_idempotent_job(server, jobs):
     status, body, _ = request(server, "POST", "/api/uploads", data={"name": "视频.mp4", "size_bytes": 5})
     assert status == 201

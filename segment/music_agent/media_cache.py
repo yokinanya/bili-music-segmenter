@@ -1,5 +1,6 @@
 """Content-addressed local audio shared by retries and independent tasks."""
 
+import re
 from pathlib import Path
 from threading import Lock
 
@@ -43,6 +44,46 @@ class LocalMediaCache:
                 "owners": sorted(set(item["owners"]) | {self.config["owner"]}),
             },
         )
+
+
+def _managed_audio(root: Path, item: dict) -> tuple[Path, ...] | None:
+    identity = item["id"]
+    if not re.fullmatch(r"[0-9a-f]{64}", identity):
+        return None
+    path = root / "audio" / f"{identity}.mp3"
+    if Path(item["path"]) != path or path.parent.resolve() != path.parent:
+        return None
+    return path, path.with_suffix(".part.mp3")
+
+
+def _managed_audio_entries(store, root: Path):
+    for item in store.list("local_cache"):
+        paths = _managed_audio(root, item)
+        if paths is not None and not any(path.is_symlink() for path in paths):
+            yield item["id"], paths
+
+
+def _audio_file_bytes(path: Path) -> int:
+    try:
+        return path.stat().st_size if path.is_file() else 0
+    except FileNotFoundError:
+        # A worker can rename the partial file while the preview is being read.
+        return 0
+
+
+def audio_cache_bytes(store, root: Path) -> int:
+    return sum(_audio_file_bytes(path) for _, paths in _managed_audio_entries(store, root) for path in paths)
+
+
+def clear_audio_cache(store, root: Path) -> int:
+    removed = 0
+    for identity, paths in _managed_audio_entries(store, root):
+        for path in paths:
+            if path.is_file():
+                path.unlink()
+                removed += 1
+        store.delete("local_cache", identity)
+    return removed
 
 
 def clean_local_cache(store, owner: str) -> None:

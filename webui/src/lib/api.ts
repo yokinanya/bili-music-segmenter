@@ -18,7 +18,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return data as T;
 }
 const post = <T>(path: string, data: unknown = {}) => request<T>(path, { method: 'POST', body: JSON.stringify(data) });
+export type CacheCategory = 'recognition' | 'waveform' | 'audio';
+
 export const api = {
+  cachePreview: () => request<{ bytes: Record<CacheCategory, number> }>('/api/settings/cache'),
+  clearCaches: (categories: readonly CacheCategory[]) => post<{ removed: Partial<Record<CacheCategory, number>> }>('/api/settings/cache/clear', { categories }),
   saveDefaults: (options: RunOptions) => request<{ options: RunOptions }>('/api/settings/task-defaults', { method: 'PUT', body: JSON.stringify(options) }),
   editClip: async (job: string, clip: string, options: {
     data: import('./types').ClipEdit; update: (value: import('./types').ClipEditProgress) => void;

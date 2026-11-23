@@ -10,6 +10,7 @@ from segment.editor_exports import Exports
 from segment.music_agent.export import export_video
 from segment.music_agent.media import media_duration
 from segment.music_agent.runtime import fingerprint
+from segment.workspace_cache import clear_caches
 from segment.workspace_downloads import register_download, validate_download
 from segment.workspace_options import RETIRED_OPTIONS, default_options, validate_options
 from segment.workspace_parts import can_complete_parts, is_bilibili_video
@@ -203,6 +204,10 @@ class Jobs:
         if not any(value["upload_id"] == identity for value in self.store.list("projects")):
             self.uploads.remove(identity)
         return {"deleted": project_id}
+
+    def clear_caches(self, payload: dict) -> dict:
+        with self._lock:
+            return clear_caches(self.store, self.root, payload)
 
     def clear_history(self) -> dict:
         """Drop task records and legacy entries; exported files and project sources stay on disk."""

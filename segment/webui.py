@@ -21,6 +21,7 @@ from segment.song_lyrics import song_lyrics
 from segment.song_search import search_songs
 from segment.usage import UsageTotals
 from segment.webui_jobs import Jobs
+from segment.workspace_cache import cache_preview
 from segment.workspace_edit_stream import STREAM_CONTENT_TYPE, stream_edit
 from segment.workspace_execution import Execution
 from segment.workspace_http import HOST, WorkspaceHTTP
@@ -91,6 +92,10 @@ class Handler(WorkspaceHTTP):
             self._json(201, {"id": self.jobs.start(self._payload())})
         elif method == "PUT" and route == "/api/settings/task-defaults":
             self._json(200, {"options": self.jobs.save_defaults(self._payload())})
+        elif method == "GET" and route == "/api/settings/cache":
+            self._json(200, cache_preview(self.jobs.store, self.jobs.root))
+        elif method == "POST" and route == "/api/settings/cache/clear":
+            self._json(200, self.jobs.clear_caches(self._payload()))
         elif method == "GET" and route == "/api/bootstrap":
             self._json(
                 200,
