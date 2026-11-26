@@ -9,20 +9,22 @@ import { icons } from '../src/lib/iconGeometries.ts';
 const require = createRequire(import.meta.url);
 const { transformSync } = require('next/dist/build/swc');
 
-function loadComponent(name, load) {
+function loadComponent(name, load, window) {
   const module = { exports: {} };
   const source = readFileSync(new URL(`../src/components/${name}.tsx`, import.meta.url), 'utf8');
   const { code } = transformSync(source, {
     jsc: { parser: { syntax: 'typescript', tsx: true }, transform: { react: { runtime: 'automatic' } } },
     module: { type: 'commonjs' },
   });
-  runInNewContext(code, { exports: module.exports, module, require: load });
+  runInNewContext(code, { exports: module.exports, module, require: load, window });
   return module.exports;
 }
 
 function renderTransport(options = {}) {
   const queued = [], slots = [], effects = [];
   const media = Object.assign(new EventTarget(), { volume: 1, muted: false });
+  const storage = new Map();
+  const window = { localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) } };
   let index = 0;
   const react = {
     useRef: value => ({ current: value }),
@@ -49,7 +51,7 @@ function renderTransport(options = {}) {
     if (name === '@/lib/iconGeometries') return { icons };
     if (name === './Material') return { Button: props => ({type:'button',props}), IconButton: props => ({type:'button',props:{...props,'aria-label':props.label}}),
       Slider: props => ({type:'input',props:{...props,'aria-label':props.label,onChange:event=>props.onChange(Number(event.currentTarget.value))}}) };
-    if (name === './PreviewVolume' || name === './Icon') return loadComponent(name.slice(2), load);
+    if (name === './PreviewVolume' || name === './Icon') return loadComponent(name.slice(2), load, window);
     if (name === '@/lib/usePointerSeek') {
       const hook = { exports: {} };
       const source = readFileSync(new URL('../src/lib/usePointerSeek.ts', import.meta.url), 'utf8');
