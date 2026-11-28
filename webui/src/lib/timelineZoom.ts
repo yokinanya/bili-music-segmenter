@@ -1,4 +1,4 @@
-export const ZOOM_STEPS = [1, 2, 4, 8, 16, 32];
+export const ZOOM_STEPS: readonly number[] = [1, 2, 4, 8, 16, 32, 64, 128];
 
 interface ZoomPosition { zoom: number; scrollLeft: number }
 interface Options { element: HTMLElement; zoom: number; onZoom: (position: ZoomPosition) => void }

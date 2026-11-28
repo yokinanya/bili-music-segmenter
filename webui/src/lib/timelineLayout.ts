@@ -13,9 +13,11 @@ export function timelineWidth(viewportWidth: number, zoom: number): number {
   return Math.max(0, viewportWidth) * Math.max(1, zoom);
 }
 
+const TIMELINE_REVEAL_INSET_PX = 24;
+
 export function revealTimelinePosition(position: number, { width, scrollLeft, scrollWidth }: {
   width: number; scrollLeft: number; scrollWidth: number;
 }): number {
   if (position >= scrollLeft && position < scrollLeft + width) return scrollLeft;
-  return Math.max(0, Math.min(scrollWidth - width, position - width / 2));
+  return Math.max(0, Math.min(scrollWidth - width, position - TIMELINE_REVEAL_INSET_PX));
 }

@@ -13,6 +13,22 @@
 .appbar-actions { display: flex; align-items: center; gap: 8px; color: var(--md-sys-color-on-surface-variant); }
 .editor-actions { display: flex; align-items: center; gap: 8px; }
 .editor-actions[hidden] { display: none; }
+.editor-actions .btn.btn-text:disabled { --container-color: transparent; }
+.draft-save-button.icon-btn { --container-shape: calc(var(--container-height) / 2); transition: var(--ripple-transition); }
+.draft-save-button[data-state='saving'] { --container-color: var(--md-sys-color-primary); --icon-color: var(--md-sys-color-on-primary); }
+.draft-save-glyphs, .draft-save-glyphs > span { display: grid; place-items: center; }
+.draft-save-glyphs > span { grid-area: 1 / 1; opacity: 0; transform: scale(.85); transition: opacity var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard); }
+.draft-save-button[data-state='idle'] [data-glyph='idle'],
+.draft-save-button[data-state='saving'] [data-glyph='saving'],
+.draft-save-button[data-state='saved'] [data-glyph='saved'] { opacity: 1; transform: scale(1); }
+.draft-save-spinner { width: 16px; height: 16px; border: 2px solid currentColor; border-inline-end-color: transparent; border-radius: 50%; }
+.draft-save-button[data-state='saving'] .draft-save-spinner { animation: draft-save-spin 750ms linear infinite; }
+@keyframes draft-save-spin { to { transform: rotate(1turn); } }
+.draft-save-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) {
+  .draft-save-glyphs > span { transform: none; transition: none; }
+  .draft-save-button[data-state='saving'] .draft-save-spinner { animation: none; }
+}
 .appbar-text-action, .theme-toggle { border: 0; background: transparent; color: inherit; cursor: pointer; }
 .appbar-text-action { padding: 6px 10px; font: inherit; font-size: 12px; white-space: nowrap; }
 .appbar-text-action:hover:not(:disabled) { color: var(--md-sys-color-primary); }

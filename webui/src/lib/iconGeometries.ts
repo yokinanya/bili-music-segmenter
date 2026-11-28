@@ -25,6 +25,7 @@ export const icons = {
   edit: icon('M5 19.8h3.2L19 9a2.8 2.8 0 0 0-4-4L4.2 16.2zM13.4 7l4.2 4.2'),
   retry: icon('M12 6.4h7.9m-7.9 0a6.85 6.85 0 1 0 5.15 10.05M12 6.4l3.1 3.1M12 6.4l3.1-3.1'),
   download: icon('M12 3v13m-5-5 5 5 5-5M4 17v4h16v-4'),
+  save: icon('M4 4h12l4 4v12H4zM8 4v5h8V4M8 20v-7h8v7'),
   music: icon('M9.5 17.5V6L18.5 4v11m-9 2.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0m9-2.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0M9.5 9.25 18.5 7.25'),
   stop: icon('M6 6h12v12H6z', { filled: true }),
   check: icon('m5 12 4.5 4.5L19 7'),

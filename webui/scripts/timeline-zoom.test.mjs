@@ -59,6 +59,12 @@ test('ordinary wheel keeps scrolling without changing zoom', () => {
   assert.equal(positions.length, 0);
 });
 
+test('Ctrl wheel reaches 128× and stops at that limit', () => {
+  const { wheel, positions } = timeline();
+  for (let turn = 0; turn < 8; turn++) wheel({ ctrlKey: true });
+  assert.deepEqual(positions.map(position => position.zoom), [4, 8, 16, 32, 64, 128]);
+});
+
 test('minimum zoom fits the timeline viewport with no horizontal overflow', () => {
   const { wheel, positions } = timeline();
   wheel({ ctrlKey: true, deltaY: 100 });
@@ -70,9 +76,10 @@ test('minimum zoom fits the timeline viewport with no horizontal overflow', () =
 test('jumping to a song reveals its start without changing an already visible view', () => {
   const { revealTimelinePosition } = loadLayout();
   const viewport = { width: 800, scrollLeft: 200, scrollWidth: 3200 };
-  assert.equal(revealTimelinePosition(1600, viewport), 1200);
+  assert.equal(revealTimelinePosition(1600, viewport), 1576);
   assert.equal(revealTimelinePosition(600, viewport), 200);
-  assert.equal(revealTimelinePosition(50, viewport), 0);
+  assert.equal(revealTimelinePosition(50, viewport), 26);
+  assert.equal(revealTimelinePosition(10, viewport), 0);
   assert.equal(revealTimelinePosition(3190, viewport), 2400);
 });
 

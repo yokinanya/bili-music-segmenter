@@ -9,7 +9,6 @@ import { useTimelineTrim } from '@/lib/useTimelineTrim';
 import { bindTimelineZoom, ZOOM_STEPS } from '@/lib/timelineZoom';
 import { revealTimelinePosition, timelineTickTranslation, timelineWidth } from '@/lib/timelineLayout';
 import { TimelineToolbar } from './TimelineToolbar';
-import { Button, Slider } from './Material';
 import { ClipContextMenu, type ClipMenuPosition } from './ClipContextMenu';
 
 interface Props {
@@ -19,7 +18,7 @@ interface Props {
   canSplit: boolean; marks: { start: number | null; end: number | null };
   onMarkIn: () => void; onMarkOut: () => void; onClearMarks: () => void;
   onLocate: (time: number) => void;
-  onMerge: (ids: string[]) => void; onSave: () => void; saving: boolean;
+  onMerge: (ids: string[]) => void;
   onSeek: (time: number) => void; onSelect: (id: string, multi: boolean) => void; onChange: (clips: SongClip[]) => void;
   onAdd: () => void; onSplit: () => void; onDelete: (ids: string[]) => void; onUndo: () => void; onRedo: () => void;
 }
@@ -109,7 +108,7 @@ export function SongTimeline(props: Props) {
   return <><section className="song-timeline" aria-label="原视频时间轴">
     <TimelineToolbar {...props} hasSelection={props.selected.length > 0} snapping={snapping}
       clip={selectedClip} onClipChange={value => props.onChange(props.clips.map(clip => clip.id === value.id ? value : clip))}
-      onSnap={() => setSnapping(value => !value)} onFit={fit} />
+      onSnap={() => setSnapping(value => !value)} onFit={fit} zoom={zoom} onZoomChange={changeZoom} />
     <div className="timeline-viewport" ref={viewport} tabIndex={0} aria-label="时间轴键盘操作：左右方向键跳到选中区间的入点或出点"
       onScroll={e => setScroll(e.currentTarget.scrollLeft)} onKeyDown={e => {
         if (e.key === 'ArrowLeft') { e.preventDefault(); jumping('start'); }
@@ -144,11 +143,5 @@ export function SongTimeline(props: Props) {
         </div>}
       </div>
     </div>
-  </section><footer className="editor-status timeline-bottom-bar">
-    <div className="timeline-bottom-zoom"><span>缩放</span>
-      <Slider label="时间轴缩放" max={ZOOM_STEPS.length - 1} value={ZOOM_STEPS.indexOf(zoom)} onChange={value => changeZoom(ZOOM_STEPS[value])} />
-      <span className="timeline-zoom-value">{zoom}×</span>
-    </div>
-    <Button variant="text" disabled={props.saving} onClick={props.onSave}>{props.saving ? '正在保存…' : '保存草稿'}</Button>
-  </footer>{menu && <ClipContextMenu position={menu} onClose={() => setMenu(null)} onDelete={props.onDelete} onMerge={props.onMerge} />}</>;
+  </section>{menu && <ClipContextMenu position={menu} onClose={() => setMenu(null)} onDelete={props.onDelete} onMerge={props.onMerge} />}</>;
 }

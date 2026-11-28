@@ -8,6 +8,8 @@ logs
 webui/node_modules
 webui/.next
 webui/out
+webui/tsconfig.tsbuildinfo
+segment/webui_dist
 __pycache__
 **/__pycache__
 .pytest_cache

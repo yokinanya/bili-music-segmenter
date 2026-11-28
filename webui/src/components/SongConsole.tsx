@@ -12,6 +12,7 @@ import { SongProperties } from './SongProperties';
 import { SongTasks, type TaskDialogMode } from './SongTasks';
 import { PreviewTransport } from './PreviewTransport';
 import { Button, MaterialDialog, Progress } from './Material';
+import { DraftSaveButton } from './DraftSaveButton';
 import { Icon } from './Icon';
 import { MergeClipsDialog } from './MergeClipsDialog';
 import { previewSpaceAction } from '@/lib/previewSpace';
@@ -76,6 +77,8 @@ export function SongConsole({ toolbarTarget }: { toolbarTarget: HTMLElement | nu
     {toolbarTarget && createPortal(<>
       <Button variant="text" disabled={!editor.project} onClick={() => setTaskMode('analysis')}>AI切片</Button>
       <Button variant="text" disabled={!editor.project || !editor.selected.length} onClick={() => setTaskMode('export')}>导出</Button>
+      {editor.project && <DraftSaveButton key={editor.project.id} disabled={!!editor.busy}
+        onSave={onSaved => editor.run('正在保存…', async () => { await editor.save(); onSaved(); })} />}
     </>, toolbarTarget)}
     <div className="console-shell">
     <div className="console-body">
@@ -97,7 +100,9 @@ export function SongConsole({ toolbarTarget }: { toolbarTarget: HTMLElement | nu
             </button>
             <button className="asset-remove" aria-label={`删除素材 ${project.name}`} disabled={!!editor.busy} onClick={() => setPendingDelete(project)}><Icon name="trash" size="sm" /></button>
           </div>)}
-          {editor.project && <section className="asset-clips"><h3>歌曲区间 <span>{editor.history.present.length}</span></h3>
+        </div>
+        {editor.project && <section className="asset-clips"><h3>歌曲区间 <span>{editor.history.present.length}</span></h3>
+          <div className="asset-scroll">
             {editor.history.present.map((value, index) => <button key={value.id} aria-pressed={editor.selected.includes(value.id)} onClick={event => {
               if (event.shiftKey) { editor.selectRange(value.id); return; }
               const multi = event.ctrlKey || event.metaKey;
@@ -109,8 +114,9 @@ export function SongConsole({ toolbarTarget }: { toolbarTarget: HTMLElement | nu
               if (editor.project) setListJump({ projectId: editor.project.id, time });
             }}>
               <span className="clip-index">{String(index + 1).padStart(2, '0')}</span><span><strong>{value.title || '待命名歌曲'}</strong><small>{clock(value.start_seconds)} — {clock(value.end_seconds)}</small></span>
-            </button>)}</section>}
-        </div>
+            </button>)}
+          </div>
+        </section>}
       </aside>
       <section className="preview-panel" aria-label="原视频预览">
         <PreviewTransport key={editor.project?.id ?? 'empty'} src={editor.project ? sourceUrl(editor.project.id) : null}
@@ -145,7 +151,6 @@ export function SongConsole({ toolbarTarget }: { toolbarTarget: HTMLElement | nu
         onSeek={seek} onSelect={editor.select} onChange={editor.change}
         onLocate={value => { video.current?.pause(); if (video.current) video.current.currentTime = value; editor.locateBoundary(value); }}
         onMerge={ids => setPendingMerge(editor.history.present.filter(value => ids.includes(value.id)))}
-        saving={!!editor.busy} onSave={() => void editor.run('正在保存…', async () => { await editor.save(); })}
         onAdd={editor.add} onSplit={editor.split} onDelete={ids => { editor.change(editor.history.present.filter(c => !ids.includes(c.id))); editor.setSelected(current => current.filter(id => !ids.includes(id))); }}
         onUndo={() => editor.dispatch({ type: 'undo' })} onRedo={() => editor.dispatch({ type: 'redo' })} />}
     </section>

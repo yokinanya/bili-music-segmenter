@@ -1,5 +1,7 @@
 services:
   api:
+    image: ghcr.io/yokinanya/music-segmenter:latest
+    container_name: music-segmenter-api
     build: .
     env_file:
       - .env
@@ -10,4 +12,3 @@ services:
     volumes:
       - ./data/webui:/data/webui
       - ./logs:/logs
-    command: ["uv", "run", "--frozen", "-m", "segment.webui", "--host", "0.0.0.0"]

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { mediaTime } from '@/lib/format';
-import { IconButton } from './Material';
+import { ZOOM_STEPS } from '@/lib/timelineZoom';
+import { IconButton, Slider } from './Material';
 import { Icon } from './Icon';
 import type { SongClip } from '@/lib/editor';
 import { BoundaryNudge } from './BoundaryNudge';
@@ -10,7 +11,7 @@ interface Props {
   duration: number; snapping: boolean; marks: { start: number | null; end: number | null };
   onUndo: () => void; onRedo: () => void; onAdd: () => void; onSplit: () => void;
   onMarkIn: () => void; onMarkOut: () => void; onClearMarks: () => void; onSnap: () => void;
-  onFit: (selection: boolean) => void;
+  onFit: (selection: boolean) => void; zoom: number; onZoomChange: (zoom: number) => void;
   clip: SongClip | undefined; onClipChange: (clip: SongClip) => void; onLocate: (time: number) => void;
 }
 export function TimelineToolbar(props: Props) {
@@ -47,6 +48,9 @@ export function TimelineToolbar(props: Props) {
     <div className="timeline-zoom">
       <IconButton onClick={() => props.onFit(false)} label="缩放至全部"><Icon name="fullscreen" /></IconButton>
       <IconButton onClick={() => props.onFit(true)} disabled={!props.hasSelection} label="缩放至选中片段"><Icon name="target" /></IconButton>
+      <span>缩放</span>
+      <Slider label="时间轴缩放" max={ZOOM_STEPS.length - 1} value={ZOOM_STEPS.indexOf(props.zoom)} onChange={value => props.onZoomChange(ZOOM_STEPS[value])} />
+      <span className="timeline-zoom-value">{props.zoom}×</span>
     </div>
     {(props.marks.start !== null || props.marks.end !== null) && <span className={`timeline-mark-summary ${valid ? '' : 'invalid'}`} role="status">
       {props.marks.start === null ? '未设入点' : mediaTime(props.marks.start)} — {props.marks.end === null ? '未设出点' : mediaTime(props.marks.end)}

@@ -2,12 +2,14 @@
 .console-shell { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .timeline-dock { flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; }
 .console-body { flex: 1; min-height: 240px; display: grid; grid-template-columns: minmax(240px, 270px) minmax(0, 1fr) minmax(250px, 290px); gap: 10px; }
-.asset-panel, .preview-panel, .song-properties, .song-timeline, .editor-status, .song-tasks { min-width: 0; }
+.asset-panel, .preview-panel, .song-properties, .song-timeline, .song-tasks { min-width: 0; }
 .asset-panel, .preview-panel, .song-properties { display: flex; flex-direction: column; border: 1px solid var(--md-sys-color-outline-variant); border-radius: 10px; background: var(--md-sys-color-surface-container-lowest); overflow: hidden; }
 .asset-panel header, .song-properties header { min-height: 44px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--md-sys-color-outline-variant); }
 .asset-panel h2, .song-properties h2, .song-properties h3 { font-size: 12px; font-weight: 600; margin: 0; }
 .asset-import { display: inline-flex; align-items: center; border: 1px solid var(--md-sys-color-outline); background: var(--md-sys-color-surface-container-low); padding: 5px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; }
 .asset-scroll, .property-scroll { overflow: auto; min-height: 0; flex: 1; padding: 14px; scrollbar-gutter: stable; }
+.asset-scroll { overscroll-behavior-y: contain; }
+.asset-panel:has(.asset-clips) > .asset-scroll { flex: 0 1 auto; max-height: 45%; }
 .asset-drop { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; min-height: 112px; padding: 14px; border: 1px dashed var(--md-sys-color-outline); border-radius: 10px; background: var(--md-sys-color-surface-container-low); margin-bottom: 12px; cursor: pointer; }
 .asset-drop:hover { border-color: var(--md-sys-color-primary); }
 .asset-panel.asset-dragging { outline: 2px solid var(--md-sys-color-primary); outline-offset: -2px; background: var(--md-sys-color-surface-container); }
@@ -23,8 +25,9 @@
 .asset-copy { min-width: 0; }
 .asset-copy strong { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .asset-copy small { font-size: 10px; color: var(--md-sys-color-on-surface-variant); margin-top: 2px; font-variant-numeric: tabular-nums; }
-.asset-clips { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--md-sys-color-outline-variant); }
-.asset-clips h3 { font-size: 12px; margin: 0 0 6px; display: flex; justify-content: space-between; }
+.asset-clips { display: flex; flex: 1; flex-direction: column; min-height: 0; border-top: 1px solid var(--md-sys-color-outline-variant); }
+.asset-clips h3 { flex-shrink: 0; font-size: 12px; margin: 0; padding: 12px 14px 6px; display: flex; justify-content: space-between; }
+.asset-clips .asset-scroll { padding-top: 0; }
 .asset-clips h3 span { color: var(--md-sys-color-on-surface-variant); font-variant-numeric: tabular-nums; }
 .asset-clips button { width: 100%; display: flex; gap: 8px; align-items: flex-start; text-align: left; border: 0; background: none; color: inherit; font: inherit; padding: 7px 6px; border-radius: 6px; cursor: pointer; }
 .asset-clips button:hover { background: var(--md-sys-color-surface-container); }
@@ -191,8 +194,10 @@ md-dialog:has(.song-task-dialog) { width: min(640px, calc(100vw - 32px)); max-wi
 .timeline-divider { width: 1px; height: 16px; flex-shrink: 0; background: var(--md-sys-color-outline-variant); margin: 0 6px; }
 .timeline-meta { font-size: 10px; color: var(--md-sys-color-on-surface-variant); }
 .timeline-zoom { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--md-sys-color-on-surface-variant); }
-.timeline-zoom input { width: 96px; }
-.timeline-viewport { overflow-x: auto; overflow-y: hidden; }
+.timeline-viewport { overflow-x: scroll; overflow-y: hidden; scrollbar-width: auto; scrollbar-color: auto; }
+.timeline-viewport::-webkit-scrollbar { height: 8px; }
+.timeline-viewport::-webkit-scrollbar-track { background: var(--md-sys-color-surface-container); }
+.timeline-viewport::-webkit-scrollbar-thumb { background: var(--md-sys-color-outline); border-radius: 4px; }
 .timeline-content { position: relative; cursor: crosshair; touch-action: none; user-select: none; }
 .time-ruler { height: 26px; position: relative; border-bottom: 1px solid var(--md-sys-color-outline-variant); }
 .time-ruler span { position: absolute; top: 7px; font-size: 9px; color: var(--md-sys-color-on-surface-variant); transform: translateX(-50%); font-variant-numeric: tabular-nums; }
@@ -213,13 +218,7 @@ md-dialog:has(.song-task-dialog) { width: min(640px, calc(100vw - 32px)); max-wi
 .timeline-playhead.snapped { width: 2px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--md-sys-color-primary) 25%, transparent); z-index: 3; }
 .timeline-playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--md-sys-color-primary); pointer-events: none; }
 .timeline-playhead i { position: absolute; top: 0; left: -4px; width: 9px; height: 9px; background: var(--md-sys-color-primary); border-radius: 2px; }
-.editor-status { flex-shrink: 0; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-height: 38px; padding-bottom: 8px; font-size: 10px; color: var(--md-sys-color-on-surface-variant); }
-.editor-status span[role='status'] { min-width: 84px; }
-.editor-status .btn:last-child { margin-left: auto; }
-.timeline-bottom-bar { justify-content: flex-end; gap: 16px; padding: 0 8px 4px; }
-.timeline-bottom-zoom { display: flex; align-items: center; gap: 8px; font-size: 10px; }
-.timeline-bottom-zoom md-slider { width: 128px; }
-.timeline-zoom-value { min-width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
+.timeline-zoom-value { min-width: 4ch; text-align: right; font-variant-numeric: tabular-nums; }
 .timeline-toolbar > .timeline-group > .btn { --container-height: 28px; --btn-container-height: 28px; height: 28px; padding-inline: 8px; font-size: 11px; white-space: nowrap; }
 .merge-clip-list { max-height: 220px; overflow-y: auto; padding-left: 20px; }
 .merge-clip-list li { padding-block: 4px; }
